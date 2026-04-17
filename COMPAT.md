@@ -1,5 +1,3 @@
-[![Docker](https://github.com/gpappsoft/privacyidea-docker/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/gpappsoft/privacyidea-docker/actions/workflows/docker-publish.yml)
-
 # Compatibility for privacyidea-docker
 
 This list is an overview of the linux-distributions and Docker versions the project was *roughly* tested. There is no guarantee that it will really work.

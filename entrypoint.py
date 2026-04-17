@@ -1,6 +1,7 @@
 import os
 import base64
 import pathlib
+import subprocess
 
 from privacyidea.app import create_app
 from privacyidea.cli.pimanage.pi_setup import (create_pgp_keys)
@@ -69,6 +70,20 @@ if os.path.exists('/privacyidea/etc/persistent/enckey') and not os.path.exists('
 
 with app.app_context():
     create_db_admin(os.environ.get('PI_ADMIN', 'admin'), 'email',os.environ.get('PI_ADMIN_PASS', 'admin'))
+
+# Dev-only: import resolver.json (resolvers/realms/policies) on first run.
+# Gated on PI_SEED_RESOLVERS=true (set only in application-dev.env) plus a flag
+# file so re-runs don't duplicate or overwrite admin tweaks.
+if os.environ.get('PI_SEED_RESOLVERS', '').lower() == 'true':
+    resolver_json = '/privacyidea/etc/persistent/resolver.json'
+    resolver_flag = '/privacyidea/etc/persistent/resolver_imported'
+    if os.path.exists(resolver_json) and not os.path.exists(resolver_flag):
+        result = subprocess.run(
+            ['/privacyidea/venv/bin/pi-manage', 'config', 'import', '-i', resolver_json],
+            check=False,
+        )
+        if result.returncode == 0:
+            pathlib.Path(resolver_flag).touch()
 
 # Run the app using gunicorn WSGI HTTP server
 cmd = [ "python",

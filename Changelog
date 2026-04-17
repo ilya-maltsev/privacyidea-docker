@@ -1,3 +1,19 @@
+Version 3.13.1, 2026-04-17
+
+  Fork and restructure
+
+- Migrate database backend from MariaDB to PostgreSQL 16
+- Single PostgreSQL instance shared between privacyIDEA and VPN Pooler
+- Replace gpappsoft/privacyidea-freeradius with locally built rlm_python3
+  (FreeRADIUS Python plugin via git submodule)
+- Add pi-vpn-pooler service (VPN IP pool manager, git submodule)
+- All application images are now built locally (no prebuilt cloud images)
+- Add build-images.sh script for build/export/import of all images
+- Add build-all Makefile target
+- Add vpn_pooler compose profile
+- Add init-vpn-pooler-db.sh for automatic database initialization
+- Update environment files for PostgreSQL (DB_API=postgresql+psycopg2)
+
 Version 3.13, 2025-07-03
 
   Release 3.13

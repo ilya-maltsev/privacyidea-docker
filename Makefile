@@ -20,6 +20,9 @@ PROFILE := stack
 build:
 	${BUILDER} --no-cache -t ${IMAGE_NAME}  --build-arg PI_VERSION_BUILD=${PI_VERSION_BUILD} --build-arg PI_VERSION=${PI_VERSION} .
 
+build-all:
+	bash build-images.sh build
+
 push:
 	${CONTAINER_ENGINE} tag ${IMAGE_NAME} ${REGISTRY}/${IMAGE_NAME}
 	${CONTAINER_ENGINE} push ${REGISTRY}/${IMAGE_NAME}
@@ -83,6 +86,6 @@ distclean:
 
 make_distclean:
 	@echo Remove container and volumes
-	@${CONTAINER_ENGINE} rm --force ${TAG}-openldap-1 ${TAG}-db-1  ${TAG}-privacyidea-1 ${TAG}-freeradius-1 ${TAG}-reverse_proxy-1 
-	@${CONTAINER_ENGINE} volume rm prod_mysql prod_pidata
+	@${CONTAINER_ENGINE} rm --force ${TAG}-openldap-1 ${TAG}-db-1  ${TAG}-privacyidea-1 ${TAG}-freeradius-1 ${TAG}-reverse_proxy-1 ${TAG}-vpn_pooler-1
+	@${CONTAINER_ENGINE} volume rm prod_pgdata prod_pidata prod_vpn_pooler_static
 

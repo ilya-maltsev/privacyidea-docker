@@ -1,8 +1,3 @@
-![GitHub Latest Release)](https://img.shields.io/github/v/release/gpappsoft/privacyidea-docker?logo=github)
-[![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/privacyidea)](https://artifacthub.io/packages/search?repo=privacyidea)
-![Docker)](https://github.com/gpappsoft/privacyidea-docker/actions/workflows/docker-publish.yml/badge.svg)
-![DockerPulls)](https://img.shields.io/docker/pulls/gpappsoft/privacyidea-docker)
-
 # privacyIDEA-docker
 
 Simply deploy and run an MFA instance in a container environment powered and based on privacyIDEA.
@@ -17,24 +12,11 @@ See [requirements](#prerequisites-and-requirements)
 
 Clone repository and start a full privacyIDEA stack*: 
 ```
-git clone https://github.com/gpappsoft/privacyidea-docker.git
+git clone --recurse-submodules https://github.com/ilya-maltsev/privacyidea-docker.git
 cd privacyidea-docker
-make cert fullstack
+make cert build-all fullstack
 ```
 Username / password: admin / admin
-
-## Easy install (Ubuntu)
-See the [privacyidea-ansible](https://github.com/gpappsoft/privacyidea-ansible) project.
-
-## Kubernetes
-
-See the [mfa-operator](https://github.com/sec73/mfa-operator) project for full featured K8s operator.
-
-## Helm
-See the [privacyidea-helm](https://github.com/gpappsoft/privacyidea-helm) project.
-
-Find helm chart on [![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/privacyidea)](https://artifacthub.io/packages/helm/privacyidea/privacyidea)
-
 
 ---
 
@@ -54,19 +36,23 @@ Find helm chart on [![Artifact Hub](https://img.shields.io/endpoint?url=https://
 | *conf* | contains *pi.cfg* and *logging.cfg* files which is included in the image build process.|
 | *environment* | contains different example-environment files for a whole stack via docker compose|
 | *scripts* | contains custom scripts for the privacyIDEA script-handler. The directory will be mounted into the container when composing a [stack](#compose-a-privacyidea-stack). Scripts must be executable (chmod +x)|
-|*templates*| contains files used for different services (nginx, radius ...) and also contains the ssl certificate for the reverse-proxy. Replace it with your own certificate and key file. Use PEM-Format without a passphrase. \*.pfx is not supported. Name must be ***pi.pem*** and ***pi.key***. ||
+| *templates*| contains files used for different services (nginx, radius ...) and also contains the ssl certificate for the reverse-proxy. Replace it with your own certificate and key file. Use PEM-Format without a passphrase. \*.pfx is not supported. Name must be ***pi.pem*** and ***pi.key***. |
+| *rlm_python3*| git submodule — [FreeRADIUS rlm_python3 plugin](https://github.com/ilya-maltsev/rlm_python3) for privacyIDEA authentication. Replaces the legacy Perl-based rlm_perl plugin.|
+| *pi-vpn-pooler*| git submodule — [VPN IP pool manager](https://github.com/ilya-maltsev/pi-vpn-pooler) that integrates with privacyIDEA API.|
 
+## Submodules
 
+This project uses git submodules for the FreeRADIUS plugin and VPN Pooler service. When cloning, use `--recurse-submodules`:
 
-## Images
-Sample images from this project can be found here: 
-| registry | repository |
-|----------|------------|
-| [docker.io](https://hub.docker.com/r/gpappsoft/privacyidea-docker)|```docker pull docker.io/gpappsoft/privacyidea-docker:latest```
-| [ghcr.io](https://github.com/gpappsoft/privacyidea-docker/pkgs/container/privacyidea-docker)| ```docker pull ghcr.io/gpappsoft/privacyidea-docker:latest```|
+```
+git clone --recurse-submodules https://github.com/ilya-maltsev/privacyidea-docker.git
+```
 
-> [!Note] 
-> ```latest``` tagged image is maybe a pre- or development-release. Please use always a release number (like ```3.13```) 
+If you already cloned without submodules, initialize them:
+
+```
+git submodule update --init --recursive
+```
 
 ## Quickstart
 
@@ -79,48 +65,68 @@ Sample images from this project can be found here:
 
 #### Quick & Dirty
 
+Build and run a simple local privacyIDEA container (standalone with sqlite):
+
 ```
-docker pull docker.io/gpappsoft/privacyidea-docker:latest
-docker run -d --name privacyidea-docker\
-            -e PI_ADMIN=admin\
-            -e PI_ADMIN_PASS=admin\
-            -e PI_PEPPER=changeMe\
-            -e PI_SECRET=changeMe\
-   	    -v pidata:/privacyidea/etc/persistent:rw,Z\
-  	    -p 8080:8080\
-	    gpappsoft/privacyidea-docker:latest
+git clone --recurse-submodules https://github.com/ilya-maltsev/privacyidea-docker.git
+cd privacyidea-docker
+make cert build run
 ```
+
 Web-UI: http://localhost:8080
 
 User/password: **admin**/**admin**
 
-#### Preferred way
-
-To build and run a simple local privacyIDEA container (which can run standalone with sqlite):
-
-```
-git clone https://github.com/gpappsoft/privacyidea-docker.git
-cd privacyidea-docker
-make cert build push run
-....
-```
-
-##### Accessing the Web-UI:
-Use https://localhost:8080
-
-Default admin username: **admin** 
-
-Default admin password: **admin**
-
-
 ## Build images
 
-You can use *Makefile* targets to build different images with different privacyIDEA versions.
+All application images are built locally — no prebuilt cloud images are used.
 
-#### Build a specific privacyIDEA version
+### Build all images at once
+
+Use `build-images.sh` to build all application images and pull infrastructure images:
+
+```
+bash build-images.sh build
+```
+
+Or use the Makefile target:
+
+```
+make build-all
+```
+
+The script automatically initializes git submodules before building.
+
+### Build, export and import
+
+For offline environments or transferring images between machines:
+
+```
+bash build-images.sh all       # build + export to privacyidea-images.tar.gz
+bash build-images.sh export    # export only (images must exist)
+bash build-images.sh import    # import from privacyidea-images.tar.gz
+```
+
+### Build a specific privacyIDEA version
 ```
 make build PI_VERSION=3.13 PI_VERSION_BUILD=3.13
 ```
+
+### Images built by this project
+
+| Image | Source | Description |
+|-------|--------|-------------|
+| `privacyidea-docker:3.13` | `./Dockerfile` | privacyIDEA application |
+| `privacyidea-freeradius:latest` | `./rlm_python3/` (submodule) | FreeRADIUS with rlm_python3 plugin |
+| `pi-vpn-pooler:latest` | `./pi-vpn-pooler/` (submodule) | VPN IP pool manager |
+
+### Infrastructure images (pulled from registry)
+
+| Image | Used by |
+|-------|---------|
+| `postgres:16-alpine` | Shared database for privacyIDEA and VPN Pooler |
+| `nginx:stable-alpine` | Reverse proxy |
+| `osixia/openldap:latest` | LDAP directory (optional, for testing) |
 
 #### Push to a registry
 Use ```make push [REGISTRY=<registry>]```to tag and push the image[^1]
@@ -146,12 +152,13 @@ make distclean
 
 | target | optional ARGS | description | example
 ---------|----------|---|---------
-| ```build ``` | ```PI_VERSION```<br> ```IMAGE_NAME```|Build an image. Optional: specify the version, requirements version and image name| ```make build PI_VERSION=3.13 PI_VERSION_BUILD=3.13```|
-| ```push``` | ```REGISTRY```|Tag and push the image to the registry. Optional: specify the registry URI. Defaults to *localhost:5000*| ```make push REGISTRY=docker.io/gpappsoft/privacyidea-docker```|
+| ```build ``` | ```PI_VERSION```<br> ```IMAGE_NAME```|Build the privacyIDEA image. Optional: specify the version and image name| ```make build PI_VERSION=3.13 PI_VERSION_BUILD=3.13```|
+| ```build-all``` | |Build all images (privacyIDEA, FreeRADIUS, VPN Pooler) and pull infrastructure images| ```make build-all```|
+| ```push``` | ```REGISTRY```|Tag and push the image to the registry. Optional: specify the registry URI. Defaults to *localhost:5000*| ```make push REGISTRY=docker.io/your-registry/privacyidea-docker```|
 | ```run``` |  ```PORT``` <br> ```TAG```  |Run a standalone container with gunicorn and sqlite. Optional: specify the prefix tag of the container name and listen port. Defaults to *pi* and port *8080*| ```make run TAG=prod PORT=8888```|
 | ```secret``` | |Generate secrets to use in an environment file | ```make secret```|
 | ```cert``` | |Generate a self-signed certificate for the reverse proxy container in *./templates* and **overwrite** the existing one | ```make cert```|
-| ```stack``` |```TAG``` ```PROFILE```| Run a whole stack with the environment file *environment/application-*```TAG```*.env*. Default is *prod*. Possible ```PROFILE``` values: ``` stack,fullstack,ldap,radius``` | ```make stack```, ```make stack TAG=dev PROFILE=fullstack``` , ```make stack TAG=prod PROFILE=stack,radius```|
+| ```stack``` |```TAG``` ```PROFILE```| Run a production stack (db, privacyidea, reverse_proxy, freeradius, vpn_pooler). Default profile is *stack*. | ```make stack```, ```make stack TAG=dev PROFILE=fullstack```|
 | ```fullstack``` || Make a full stack with docker-compose.yml | ```make fullstack```
 | ```resolver``` || Create resolvers and realm for fullstack | ```make resolver```
 | ```clean``` |```TAG```| Remove the container and network without removing the named volumes. Optional: change prefix tag of the container name. Defaults to *prod* | ```make clean TAG=prod```|
@@ -162,98 +169,106 @@ make distclean
 
 ## Compose a privacyIDEA stack
 
-By using docker compose you can easily deploy a customized privacyIDEA instance, including Nginx as a reverse-proxy and MariaDB as a database backend.
+By using docker compose you can easily deploy a customized privacyIDEA instance, including Nginx as a reverse-proxy and PostgreSQL as a database backend.
 
-With the use of different environment files for different full-stacks,  you can deploy and run multiple stacks at the same time on different ports. 
+With the use of different environment files for different full-stacks, you can deploy and run multiple stacks at the same time on different ports. 
 
 ```mermaid
 graph TD;
-  a2("--env-file=environment/application-dev.env");
-  w4(https://localhost:8444);
-  w5(RADIUS  2812);
-  w6(LDAP 2389);
-  subgraph s3 [ ];
-       r2(RADIUS);
-       n5(NGINX);
-       n6(LDAP);
-       n7(privacyIDEA);
-       n8(MariaDB);
-  st2[stack 2];
-  end;
-  
   a1("--env-file=environment/application-prod.env");
   w1(https://localhost:8443);
   w2(RADIUS 1812);
   w3(LDAP 1389);
+  w7(VPN Pooler :5443);
   subgraph s1 [ ];
-       r1(RADIUS);
+       r1(RADIUS<br/>rlm_python3);
        n1(NGINX);
        n2(LDAP);
        n3(privacyIDEA);
-       n4(MariaDB);
-  st1[Stack 1];
+       n4(PostgreSQL);
+       vpn1(VPN Pooler);
+  st1[Stack];
   end;
   
   a1~~~w1;
   a1~~~w2;
   a1~~~w3;
-
-  a2~~~w4;
-  a2~~~w5;
-  a2~~~w6;
+  a1~~~w7;
 
   w1<-- API / WebUI -->n1<-- reverse proxy -->n3(privacyIDEA)<-->n4
   w2<-- radius auth -->r1<-- privacyIDEA Radius -->n3
   w3<-- for clients -->n2<-- resolver -->n3
-
-  w4<-- API / WebUI -->n5<-- reverse proxy -->n7(privacyIDEA)<-->n8
-  w5<-- radius auth -->r2<-- privacyIDEA Radius -->n7
-  w6<-- for clients -->n6<-- resolver -->n7
+  w7<-- VPN pool mgmt -->vpn1<-- privacyIDEA API -->n3
+  vpn1<-->n4
 
   classDef plain font-size:12px,fill:#ddd,stroke:#fff,stroke-width:4px,color:#000;
   classDef heading font-size:12px,fill:#9db668,stroke:#fff,stroke-width:1px,color:#fff;
   classDef title font-size:16px,color:#000,background-color:#9db668,stroke:#ffff;
   classDef docker fill:#265a88,stroke:#fff,stroke-width:2px,color:#fff;
   classDef second fill:#dba614,stroke:#fff,stroke-width:2px,color:#fff;
-  classDef tags fill:#dba614,stroke:#fff,stroke-width:2px,color:#fff;
   classDef cluster fill:#fff,stroke:#888,stroke-width:2px,color:#265a88;
-  class w1,w2,w3,w4,w5,w6 plain;
-  class r1,n2,r2,n6 second;
-  class n1,n3,n4,n5,n6,n7,n8,r2,t1 docker;
-  class s1,s2,s3,s4 title;
-  class a1,a2,st1,st2 heading;
+  class w1,w2,w3,w7 plain;
+  class r1,n2,vpn1 second;
+  class n1,n3,n4 docker;
+  class s1 title;
+  class a1,st1 heading;
 ```
 
 Find example .env files in the *environment* directory.
 
+### Profiles
+
+| Profile | Services | Use case |
+|---------|----------|----------|
+| `stack` | db, privacyidea, reverse_proxy, freeradius, vpn_pooler | **Production** — full working set without LDAP |
+| `fullstack` | all services including openldap | **Dev/testing** — includes LDAP with sample data |
+| `ldap` | openldap | LDAP directory only (add to other profiles) |
+
+### Exposed ports (stack profile)
+
+| Service | Host port | Protocol |
+|---------|-----------|----------|
+| db (PostgreSQL) | `${DB_PORT:-5432}` | tcp |
+| privacyidea | `${PI_PORT:-8080}` | tcp |
+| reverse_proxy | `${PROXY_PORT:-8443}` | tcp (HTTPS) |
+| freeradius | `${RADIUS_PORT:-1812}` | tcp + udp |
+| freeradius | `${RADIUS_PORT_INC:-1813}` | udp |
+| vpn_pooler | `${VPN_POOLER_PORT:-5443}` | tcp |
+
 > [!Note]
-> The optional RADIUS and LDAP container is only available with ```PROFILE=fullstack|ldap|radius```. See examples below.
-- The radius container use the image from [privacyidea-freeradius](https://github.com/gpappsoft/privacyidea-freeradius).
-- The openldap use the [osicia/docker-openldap](https://github.com/osixia/docker-openldap) image.
+> The openldap container is only available with `fullstack` or `ldap` profiles (dev/testing only).
+- The radius container is built locally from the [rlm_python3](https://github.com/ilya-maltsev/rlm_python3) submodule.
+- The VPN Pooler is built locally from the [pi-vpn-pooler](https://github.com/ilya-maltsev/pi-vpn-pooler) submodule.
+- The openldap uses the [osixia/docker-openldap](https://github.com/osixia/docker-openldap) image.
 
 ---
 ### Examples:
-> [!Note]
-> The *docker-compose.yaml*, used in this example, always use images from external registries. Change docker-compose.yaml to use your own images.
+
+Build all images and run a full stack:
+
+```
+make cert build-all fullstack
+```
 
 Run a stack with project the name *prod* and environment variables files from *environment/application-prod.env*
 
 ```
   $ make cert  #run only once to generate certificate
-  $ docker compose --env-file=environment/application-prod.env -p prod up
+  $ docker compose --env-file=environment/application-prod.env -p prod --profile=stack up -d
 ```
-Or simple run a ```make```target.
+Or simple run a ```make``` target.
 
-This example will start a stack including **privacyIDEA**, **reverse_proxy** and **mariadb** container:
+This example will start a production stack including **PostgreSQL**, **privacyIDEA**, **reverse_proxy**, **FreeRADIUS** and **VPN Pooler**:
 ```
 make cert stack
 ```
 
-This example will start a full stack including **privacyIDEA**, **reverse_proxy**, **mariadb**, **ldap** and **radius** including sample data with users,realms. Project tag is *prod*
+This example will start a full stack (dev) including all production services **plus OpenLDAP** with sample data, users and realms. Project tag is *prod*:
 
 ```
 make cert fullstack 
 ```
+
 > [!Note]
 > The ldap have sample users. The resolvers and realm are already configured in privacyIDEA when stack is ready.
 
@@ -266,12 +281,12 @@ docker compose -p prod down
 You can start the stack in the background with console detached using the **-d** parameter.
 
 ```
-  $ docker compose --env-file=environment/application-prod.env -p prod up -d
+  $ docker compose --env-file=environment/application-prod.env -p prod --profile=stack up -d
 ```
 
 Full example including build with  ```make```targets:
 ```
-make cert build push stack PI_VERSION=3.13 PI_VERSION_BUILD=3.13 TAG=pidev
+make cert build-all stack PI_VERSION=3.13 PI_VERSION_BUILD=3.13 TAG=pidev
 ```
 ---
 Now you can deploy additional containers like OpenLDAP for user realms or Owncloud as a client to test 2FA authentication. 
@@ -280,8 +295,25 @@ Have fun!
 
 > [!IMPORTANT] 
 >- Volumes will not be deleted. 
->- Delete the files in */privacyidea/etc/persistent/ **inside* the privacyIDEA container if you want to bootstrap again. This will not delete an existing database expect sqlite databases!
->- Compose a stack takes some time until the database tables are deplolyed and privacyIDEA is ready to run. Check health status of the container.
+>- Delete the files in */privacyidea/etc/persistent/ **inside* the privacyIDEA container if you want to bootstrap again. This will not delete an existing database except sqlite databases!
+>- Compose a stack takes some time until the database tables are deployed and privacyIDEA is ready to run. Check health status of the container.
+
+
+## Database
+
+This project uses **PostgreSQL 16** as the database backend.
+
+A single PostgreSQL instance is shared between privacyIDEA and VPN Pooler. Each application uses its own database:
+
+| Database | User | Used by |
+|----------|------|---------|
+| `pi` | `pi` | privacyIDEA |
+| `vpn_pooler` | `vpn_pooler` | VPN Pooler |
+
+The VPN Pooler database and user are created automatically on first start via the init script `templates/init-vpn-pooler-db.sh`.
+
+> [!Note]
+> privacyIDEA uses `psycopg2` as the PostgreSQL adapter. Since privacyIDEA 3.3, the PostgreSQL adapter is not included in the default installation (see [privacyIDEA FAQ](https://privacyidea.readthedocs.io/en/stable/faq/mysqldb.html)). This project installs `psycopg2-binary` explicitly in the Dockerfile.
 
 
 ## Environment Variables
@@ -296,24 +328,24 @@ Have fun!
 ```PI_PASSWORD```|admin| Password for the admin user. See [Security considerations](#security-considerations) for more information.
 ```PI_PEPPER``` | changeMe | Used for ```PI_PEPPER``` in pi.cfg. The filename, including the path, to the file **inside** the container, with the secret. Use `make secrets` to generate new random secrets to use with an environment file See [Security considerations](#security-considerations) for more information.
 ```PI_SECRET``` | changeMe | Used for ```SECRET_KEY``` in pi.cfg. Use `make secrets` to generate new random secrets to use with an environment file. See [Security considerations](#security-considerations) for more information.
-```PI_ENCKEY```|| The enckey file for DB-encryption (base64). Only used if exists. Otherwise it will be generatetd using the ```pi-manage``` command. See [privacy documentation](https://privacyidea.readthedocs.io/en/latest/faq/crypto-considerations.html?highlight=enckey) how to create a key.
-```PI_PORT```|8080| Port used by gunicorn. Don't use this directly in productive environments. Use a reverse proxy..
+```PI_ENCKEY```|| The enckey file for DB-encryption (base64). Only used if exists. Otherwise it will be generated using the ```pi-manage``` command. See [privacy documentation](https://privacyidea.readthedocs.io/en/latest/faq/crypto-considerations.html?highlight=enckey) how to create a key.
+```PI_PORT```|8080| Port used by gunicorn. Don't use this directly in productive environments. Use a reverse proxy.
 ```PI_LOGLEVEL```|INFO| Log level in uppercase (DEBUG, INFO, WARNING, ect.). 
 ```SUPERUSER_REALM```|"admin,helpdesk"| Admin realms, which can be used for policies in privacyIDEA. Comma separated list. See the privacyIDEA documentation for more information.
-```PI_SQLALCHEMY_ENGINE_OPTIONS```| False | Set pool_pre_ping option. Set to ```True``` for DB clusters (like Galera).
+```PI_SQLALCHEMY_ENGINE_OPTIONS```| False | Set pool_pre_ping option. Set to ```True``` for DB clusters.
+```PI_SEED_RESOLVERS```| *(unset)* | Dev-only one-shot seed. When set to `true`, `entrypoint.py` runs `pi-manage config import -i /privacyidea/etc/persistent/resolver.json` on first boot and writes a `resolver_imported` flag file so re-runs don't re-import or overwrite admin tweaks. Set only in `application-dev.env`; leave unset in prod.
 
-**Additional enviornment variables** starting with ```PI_``` will automatically added to ```pi.cfg```
+**Additional environment variables** starting with ```PI_``` will automatically added to ```pi.cfg```
 
 ### DB connection parameters
-| Variable | Description
-|-----|-------------
-```DB_HOST```| Database host
-```DB_PORT```| Database port
-```DB_NAME```| Database name
-```DB_USER```| Database user
-```DB_PASSWORD```| The database password.
-```DB_API```| Database driver (e.g. ```mysql+pymysql```)
-```DB_EXTRA_PARAM```| Extra parameter (e.g. ```"?charset=utf8"```). Will be appended to the SQLAlchemy URI (see pi.cfg)
+| Variable | Default | Description
+|-----|---------|-------------
+```DB_HOST```| db | Database host
+```DB_PORT```| 5432 | Database port
+```DB_NAME```| pi | Database name
+```DB_USER```| pi | Database user
+```DB_PASSWORD```| superSecret | The database password.
+```DB_API```| postgresql+psycopg2 | Database driver for SQLAlchemy
 
 ### Reverse proxy parameters (for compose/stack)
 | Variable | Default | Description
@@ -325,7 +357,26 @@ Have fun!
 | Variable | Default | Description
 |-----|---------|-------------
 ```RADIUS_PORT```| 1812 | Exposed (external) radius port tcp/udp
-```RADIUS_PORT```| 1813 | Additional exposed (external) radius port udp
+```RADIUS_PORT_INC```| 1813 | Additional exposed (external) radius port udp
+```RADIUS_PI_REALM```| | privacyIDEA realm for RADIUS authentication
+```RADIUS_PI_RESCONF```| | privacyIDEA resolver configuration for RADIUS
+```RADIUS_PI_SSLCHECK```| false | Enable SSL certificate verification for privacyIDEA API
+```RADIUS_DEBUG```| false | Enable debug logging in FreeRADIUS plugin
+```RADIUS_PI_TIMEOUT```| 10 | Timeout (seconds) for privacyIDEA API requests
+
+### VPN Pooler parameters (for compose/vpn_pooler)
+| Variable | Default | Description
+|-----|---------|-------------
+```VPN_POOLER_DB_NAME```| vpn_pooler | VPN Pooler database name
+```VPN_POOLER_DB_USER```| vpn_pooler | VPN Pooler database user
+```VPN_POOLER_DB_PASSWORD```| changeme | VPN Pooler database password
+```VPN_POOLER_PI_API_URL```| https://reverse_proxy:443 | privacyIDEA API URL
+```VPN_POOLER_PI_VERIFY_SSL```| false | Verify SSL certificate of privacyIDEA API
+```VPN_POOLER_DJANGO_SECRET_KEY```| changeme | Django secret key
+```VPN_POOLER_DJANGO_DEBUG```| false | Enable Django debug mode
+```VPN_POOLER_DJANGO_ALLOWED_HOSTS```| * | Django allowed hosts
+```VPN_POOLER_CSRF_TRUSTED_ORIGINS```| https://localhost:5443 | CSRF trusted origins
+```VPN_POOLER_PORT```| 5443 | Exposed port for VPN Pooler
 
 ### LDAP parameters (for compose/fullstack)
 | Variable | Default | Description
@@ -356,22 +407,22 @@ The current concept of using secrets with environment variables is not recommend
 
 - Simply use a cron job on the host system with docker exec and the pi-manage command: 
 ```
-docker exec -it pi-privacyidea-1 pi-manage audit rotate_audit --age 90
+docker exec -it prod-privacyidea-1 pi-manage audit rotate_audit --age 90
 ```
-#### How can i access the logs?
+#### How can I access the logs?
 
 - Use docker log:  
 ```
-docker logs pi-privacyidea-1 
+docker logs prod-privacyidea-1 
 ```
 
 #### How can I update the container to a new privacyIDEA version?
 - Build a new image, make a push and pull. Re-create the container with additional argument ```PIUPDATE```. This will run the schema update script to update the database. Or use the ```privacyidea-schema-upgrade``` script.
 
 #### Can I import a privacyIDEA database dump into the database container from the stack?
-- Yes, by providing the sql dump to the db container. Please refer to the *"Initializing the database contents"* section from the official [MariaDB docker documentation](https://hub.docker.com/_/mariadb).
+- Yes, by providing the sql dump to the db container. Please refer to the *"Initialization scripts"* section from the official [PostgreSQL docker documentation](https://hub.docker.com/_/postgres).
 
-#### Help! ```make build``` does not work, how can i fix it?
+#### Help! ```make build``` does not work, how can I fix it?
 
 - Check the [Prerequisites and requirements](#prerequisites-and-requirements). Often there is a missing plugin (buildx, compose) - install the plugins and try again:
 ```
@@ -407,20 +458,19 @@ chcon -R -t container_file_t PATHTOHOSTDIR
 For the example stack, use the db container: 
 
 ```
-docker exec -it pi-db-1 mariadb-dump -u pi -psuperSecret pi
+docker exec -it prod-db-1 pg_dump -U pi pi
 ```
 
-# Professional support
+To dump the VPN Pooler database:
 
-Please contact [info@sec73.io](mailto:info@sec73.io) company for professional support.
+```
+docker exec -it prod-db-1 pg_dump -U vpn_pooler vpn_pooler
+```
 
 # Disclaimer
 
-This project is my private project doing in my free time. This project is not from the NetKnights company. The project uses the open-source version of privacyIDEA. There is no official support from NetKnights for this project.
+This project is a fork of [gpappsoft/privacyidea-docker](https://github.com/gpappsoft/privacyidea-docker). The project uses the open-source version of privacyIDEA. There is no official support from NetKnights for this project.
 
 [^1]: If you push to external registries, you may have to login first.
 [^2]: You can run your own local registry with:\
    ``` docker  run -d -p 5000:5000 --name registry registry:2.7 ``` 
-   
-   
-

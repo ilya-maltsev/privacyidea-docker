@@ -25,11 +25,11 @@ RUN apk add python-${PYVERSION} py${PYVERSION}-pip python3-dev gnupg git nodejs-
 USER nonroot
 ENV SETUPTOOLS_SCM_PRETEND_VERSION=${PI_VERSION}
 RUN python -m venv /privacyidea/venv
-RUN pip install  -r https://raw.githubusercontent.com/gpappsoft/privacyidea/refs/tags/v${PI_REQUIREMENTS}/requirements.txt
+RUN pip install  -r https://raw.githubusercontent.com/privacyidea/privacyidea/refs/tags/v${PI_REQUIREMENTS}/requirements.txt
 RUN pip install psycopg2-binary==${PSYCOPG2} gunicorn==${GUNICORN} gnupg
 
-# Install privacyIDEA from forked GitHub repository
-RUN git clone --branch v${PI_VERSION} --depth 1 https://github.com/gpappsoft/privacyidea.git /privacyidea/pi_src \
+# Install privacyIDEA from original GitHub repository
+RUN git clone --branch v${PI_VERSION} --depth 1 https://github.com/privacyidea/privacyidea.git /privacyidea/pi_src \
         && pip install /privacyidea/pi_src
 
 # Enable if HSM or Kerberos needed
@@ -63,9 +63,9 @@ ARG PYVERSION=3.13
 ENV PYTHONUNBUFFERED=1
 ENV PATH="/privacyidea/venv/bin:/privacyidea/bin:$PATH"
 ENV PRIVACYIDEA_CONFIGFILE="/privacyidea/etc/pi.cfg"
-LABEL maintainer="Marco Moenig <marco@moenig.it>"
-LABEL org.opencontainers.image.source="https://github.com/gpappsoft/privacyidea-docker.git"
-LABEL org.opencontainers.image.url="https://github.com/gpappsoft/privacyidea-docker.git"
+LABEL maintainer="Ilya Maltsev <i.y.maltsev@yandex.ru>"
+LABEL org.opencontainers.image.source="https://github.com/ilya-maltsev/privacyidea-docker.git"
+LABEL org.opencontainers.image.url="https://github.com/ilya-maltsev/privacyidea-docker.git"
 LABEL org.opencontainers.image.description="Simply deploy and run a privacyIDEA instance in a container environment."
 
 WORKDIR /privacyidea

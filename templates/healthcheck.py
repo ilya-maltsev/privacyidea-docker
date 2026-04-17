@@ -1,4 +1,4 @@
-#!/privacyidea/bin/python
+#!/privacyidea/venv/bin/python
 import requests
 import os
 

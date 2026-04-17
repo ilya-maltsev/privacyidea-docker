@@ -1,32 +1,40 @@
 services:
   db:
-    image: mariadb:10.6
+    image: postgres:16-alpine
     environment:
-      MARIADB_RANDOM_ROOT_PASSWORD: 1
-      MARIADB_DATABASE: ${DB_NAME}
-      MARIADB_USER: ${DB_USER}
-      MARIADB_PASSWORD: ${DB_PASSWORD}
-      MARIADB_MYSQL_LOCALHOST_USER: true
-    expose:
-      - ${DB_PORT}
+      POSTGRES_DB: ${DB_NAME:-pi}
+      POSTGRES_USER: ${DB_USER:-pi}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-superSecret}
+      VPN_POOLER_DB_NAME: ${VPN_POOLER_DB_NAME:-vpn_pooler}
+      VPN_POOLER_DB_USER: ${VPN_POOLER_DB_USER:-vpn_pooler}
+      VPN_POOLER_DB_PASSWORD: ${VPN_POOLER_DB_PASSWORD:-changeme}
+    ports:
+      - "${DB_PORT:-5432}:5432"
     volumes:
-      - mysql:/var/lib/mysql:rw,Z
+      - pgdata:/var/lib/postgresql/data:rw,Z
+      - type: bind
+        source: ./templates/init-vpn-pooler-db.sh
+        target: /docker-entrypoint-initdb.d/init-vpn-pooler-db.sh
+        read_only: true
     networks:
       - privacyidea
     restart: always
     healthcheck:
-      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-pi}"]
       interval: 5s
       retries: 5
       start_period: 30s
     profiles:
       - fullstack
       - stack
-      - radius
-      - openldap
 
   privacyidea:
-    image: gpappsoft/privacyidea-docker:${PI_VERSION}
+    build:
+      context: .
+      args:
+        PI_VERSION: "3.13"
+        PI_VERSION_BUILD: "3.13"
+    image: privacyidea-docker:3.13
     depends_on:
       db:
         condition: service_healthy
@@ -37,8 +45,8 @@ services:
         window: 60s
     env_file:
       - ${ENVIRONMENT}
-    expose:
-      - ${PI_PORT}
+    ports:
+      - "${PI_PORT:-8080}:${PI_PORT:-8080}"
     volumes:
       - pidata:/privacyidea/etc/persistent:rw,Z
       - type: bind
@@ -62,16 +70,19 @@ services:
     profiles:
       - fullstack
       - stack
-      - radius
-      - openldap
 
   reverse_proxy:
     image: nginx:stable-alpine
     environment:
       APP_PORT: ${PI_PORT}
       SERVERNAME: ${PROXY_SERVERNAME:-localhost}
+      # Prod: set NGINX_TLS_CERT_PATH / NGINX_TLS_KEY_PATH to wherever you mount real certs.
+      # Dev: defaults point at the self-signed pair bind-mounted below.
+      SSL_CERT: ${NGINX_TLS_CERT_PATH:-/etc/nginx/ssl/pi.pem}
+      SSL_KEY: ${NGINX_TLS_KEY_PATH:-/etc/nginx/ssl/pi.key}
     ports:
       - "${PROXY_PORT}:443"
+      - "${VPN_POOLER_PORT:-5443}:444"
     volumes:
       - type: bind
         source: ./templates/nginx.conf
@@ -99,13 +110,18 @@ services:
     profiles:
       - fullstack
       - stack
-      - radius
-      - openldap
 
   freeradius:
-    image: gpappsoft/privacyidea-freeradius:latest
+    build:
+      context: ./rlm_python3
+    image: privacyidea-freeradius:latest
     environment:
       RADIUS_PI_HOST: https://reverse_proxy
+      RADIUS_PI_REALM: ${RADIUS_PI_REALM:-}
+      RADIUS_PI_RESCONF: ${RADIUS_PI_RESCONF:-}
+      RADIUS_PI_SSLCHECK: ${RADIUS_PI_SSLCHECK:-false}
+      RADIUS_DEBUG: ${RADIUS_DEBUG:-false}
+      RADIUS_PI_TIMEOUT: ${RADIUS_PI_TIMEOUT:-10}
     ports:
       - "${RADIUS_PORT:-1812}:1812/tcp"
       - "${RADIUS_PORT:-1812}:1812/udp"
@@ -124,7 +140,38 @@ services:
     restart: always
     profiles:
       - fullstack
-      - radius
+      - stack
+
+  vpn_pooler:
+    build:
+      context: ./pi-vpn-pooler
+    image: pi-vpn-pooler:latest
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_NAME: ${VPN_POOLER_DB_NAME:-vpn_pooler}
+      DB_USER: ${VPN_POOLER_DB_USER:-vpn_pooler}
+      DB_PASSWORD: ${VPN_POOLER_DB_PASSWORD:-changeme}
+      DB_HOST: db
+      DB_PORT: 5432
+      PI_API_URL: ${VPN_POOLER_PI_API_URL:-https://reverse_proxy:443}
+      PI_VERIFY_SSL: ${VPN_POOLER_PI_VERIFY_SSL:-false}
+      DJANGO_SECRET_KEY: ${VPN_POOLER_DJANGO_SECRET_KEY:-changeme}
+      DJANGO_DEBUG: ${VPN_POOLER_DJANGO_DEBUG:-false}
+      DJANGO_ALLOWED_HOSTS: ${VPN_POOLER_DJANGO_ALLOWED_HOSTS:-*}
+      CSRF_TRUSTED_ORIGINS: ${VPN_POOLER_CSRF_TRUSTED_ORIGINS:-https://localhost:5443}
+      DJANGO_LOG_LEVEL: ${VPN_POOLER_DJANGO_LOG_LEVEL:-INFO}
+    volumes:
+      - vpn_pooler_static:/app/staticfiles
+    expose:
+      - "8000"
+    networks:
+      - privacyidea
+    restart: always
+    profiles:
+      - fullstack
+      - stack
 
   openldap:
     image: osixia/openldap:latest
@@ -158,8 +205,9 @@ services:
       - ldap
     
 volumes:
-  mysql: {}
+  pgdata: {}
   pidata: {}
+  vpn_pooler_static: {}
  
 networks:
   privacyidea: {}
