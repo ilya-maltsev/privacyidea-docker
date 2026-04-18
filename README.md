@@ -203,6 +203,7 @@ graph TD;
   w3<-- for clients -->n2<-- resolver -->n3
   w7<-- VPN pool mgmt -->n1<-- ":444 → :8000" -->vpn1<-- "PI API via NGINX" -->n1
   vpn1<-->n4
+  n3-. "syslog udp/514" .->syslog1
   r1-. "syslog udp/514" .->syslog1
   vpn1-. "syslog udp/514" .->syslog1
 
@@ -235,7 +236,7 @@ Find example .env files in the *environment* directory.
 > **Dev-only resolver seed.** `application-dev.env` sets `PI_SEED_RESOLVERS=true`, which tells `entrypoint.py` to run `pi-manage config import -i /privacyidea/etc/persistent/resolver.json` on first boot. The seed is idempotent (gated on a `resolver_imported` flag file) and is **not** enabled in `application-prod.env` — prod stacks start with an empty privacyIDEA configuration.
 
 > [!Note]
-> **Dev-only rsyslog collector.** The `fullstack` profile includes an `rsyslog` container that receives syslog messages (UDP 514) from FreeRADIUS and VPN Pooler on the internal Docker network. Logs are written to per-service files inside the `rsyslog_logs` volume (`privacyidea-radius.log`, `pi-vpn-pooler.log`, `all.log`). `application-dev.env` pre-configures both services to forward to this collector at `DEBUG` level. The `stack` (production) profile does **not** include rsyslog — configure your own external rsyslog host via the `*_SYSLOG_HOST` variables instead.
+> **Dev-only rsyslog collector.** The `fullstack` profile includes an `rsyslog` container that receives syslog messages (UDP 514) from privacyIDEA, FreeRADIUS and VPN Pooler on the internal Docker network. Logs are written to per-service files inside the `rsyslog_logs` volume (`privacyidea.log`, `privacyidea-radius.log`, `pi-vpn-pooler.log`, `all.log`). `application-dev.env` pre-configures all three services to forward to this collector. The `stack` (production) profile does **not** include rsyslog — configure your own external rsyslog host via the `*_SYSLOG_HOST` variables instead.
 
 ### Exposed ports (stack profile)
 
@@ -350,6 +351,13 @@ The VPN Pooler database and user are created automatically on first start via th
 ```SUPERUSER_REALM```|"admin,helpdesk"| Admin realms, which can be used for policies in privacyIDEA. Comma separated list. See the privacyIDEA documentation for more information.
 ```PI_SQLALCHEMY_ENGINE_OPTIONS```| False | Set pool_pre_ping option. Set to ```True``` for DB clusters.
 ```PI_SEED_RESOLVERS```| *(unset)* | Dev-only one-shot seed. When set to `true`, `entrypoint.py` runs `pi-manage config import -i /privacyidea/etc/persistent/resolver.json` on first boot and writes a `resolver_imported` flag file so re-runs don't re-import or overwrite admin tweaks. Set only in `application-dev.env`; leave unset in prod.
+```PI_SYSLOG_ENABLED```| false | Enable remote syslog forwarding from the privacyIDEA application. When `false`, logs only go to stdout / container logs.
+```PI_SYSLOG_HOST```| *(empty)* | Remote rsyslog host. Required when `PI_SYSLOG_ENABLED=true`.
+```PI_SYSLOG_PORT```| 514 | Remote rsyslog port.
+```PI_SYSLOG_PROTO```| udp | Transport for remote rsyslog: `udp` or `tcp`.
+```PI_SYSLOG_FACILITY```| local1 | Syslog facility.
+```PI_SYSLOG_TAG```| privacyidea | Syslog program name / ident.
+```PI_SYSLOG_LEVEL```| INFO | Minimum level forwarded: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`.
 
 **Additional environment variables** starting with ```PI_``` will automatically added to ```pi.cfg```
 
@@ -433,10 +441,10 @@ The nginx `reverse_proxy` service serves TLS on two ports (privacyIDEA `:443`, V
 
 ## Syslog and DEBUG logging
 
-Both the **rlm_python3** RADIUS plugin and the **pi-vpn-pooler** Django app can forward application logs to an rsyslog server. Everything is configurable via the `*_SYSLOG_*` environment variables described in the [RADIUS](#radius-parameters-for-composefullstack) and [VPN Pooler](#vpn-pooler-parameters-for-composevpn_pooler) tables above. Defaults: transport `udp`, port `514`, level `INFO`; remote forwarding is off until a host is set (RADIUS auto-uses local syslogd; VPN Pooler requires `VPN_POOLER_SYSLOG_ENABLED=true`).
+The **privacyIDEA** application, the **rlm_python3** RADIUS plugin, and the **pi-vpn-pooler** Django app can all forward application logs to an rsyslog server. Everything is configurable via the `PI_SYSLOG_*` / `RADIUS_SYSLOG_*` / `VPN_POOLER_SYSLOG_*` environment variables described in the [privacyIDEA](#privacyidea), [RADIUS](#radius-parameters-for-composefullstack) and [VPN Pooler](#vpn-pooler-parameters-for-composevpn_pooler) tables above. Defaults: transport `udp`, port `514`, level `INFO`; remote forwarding is off until a host is set.
 
-- **Dev (fullstack)**: the `rsyslog` container is included in the stack and `application-dev.env` pre-configures both services to forward to it at `DEBUG` level. Logs are written to the `rsyslog_logs` volume as per-service text files (`privacyidea-radius.log`, `pi-vpn-pooler.log`, `all.log`).
-- **Prod (stack)**: no rsyslog container is included. Set `RADIUS_SYSLOG_HOST` / `VPN_POOLER_SYSLOG_HOST` to your own syslog infrastructure.
+- **Dev (fullstack)**: the `rsyslog` container is included in the stack and `application-dev.env` pre-configures all three services to forward to it. Logs are written to the `rsyslog_logs` volume as per-service text files (`privacyidea.log`, `privacyidea-radius.log`, `pi-vpn-pooler.log`, `all.log`).
+- **Prod (stack)**: no rsyslog container is included. Set `PI_SYSLOG_HOST` / `RADIUS_SYSLOG_HOST` / `VPN_POOLER_SYSLOG_HOST` to your own syslog infrastructure.
 
 ### Two log tiers
 
@@ -478,6 +486,7 @@ docker exec dev-rsyslog-1 tail -f /var/log/remote/all.log
 ```
 
 Per-service files:
+- `/var/log/remote/privacyidea.log`
 - `/var/log/remote/privacyidea-radius.log`
 - `/var/log/remote/pi-vpn-pooler.log`
 - `/var/log/remote/all.log` (combined)
@@ -493,6 +502,11 @@ nc -u -l 1514
 Then in your env file:
 
 ```
+PI_SYSLOG_ENABLED=true
+PI_SYSLOG_HOST=host.docker.internal
+PI_SYSLOG_PORT=1514
+PI_SYSLOG_LEVEL=INFO
+
 RADIUS_SYSLOG_HOST=host.docker.internal
 RADIUS_SYSLOG_PORT=1514
 RADIUS_SYSLOG_LEVEL=DEBUG

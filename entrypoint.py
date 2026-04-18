@@ -1,7 +1,11 @@
 import os
 import base64
+import logging.handlers
 import pathlib
+import socket
 import subprocess
+
+import yaml
 
 from privacyidea.app import create_app
 from privacyidea.cli.pimanage.pi_setup import (create_pgp_keys)
@@ -84,6 +88,56 @@ if os.environ.get('PI_SEED_RESOLVERS', '').lower() == 'true':
         )
         if result.returncode == 0:
             pathlib.Path(resolver_flag).touch()
+
+# ---------------------------------------------------------------------------
+# Optional syslog handler — inject into logging.cfg before gunicorn starts
+# ---------------------------------------------------------------------------
+_syslog_enabled = os.environ.get('PI_SYSLOG_ENABLED', '').lower() in ('true', '1', 'yes')
+_syslog_host = os.environ.get('PI_SYSLOG_HOST', '')
+
+if _syslog_enabled and _syslog_host:
+    _log_cfg_path = '/privacyidea/etc/logging.cfg'
+    _log_cfg_out = '/privacyidea/etc/persistent/logging_runtime.cfg'
+
+    with open(_log_cfg_path) as _f:
+        _log_cfg = yaml.safe_load(_f)
+
+    _syslog_port = int(os.environ.get('PI_SYSLOG_PORT', '514'))
+    _syslog_proto = os.environ.get('PI_SYSLOG_PROTO', 'udp').lower()
+    _syslog_facility = os.environ.get('PI_SYSLOG_FACILITY', 'local1')
+    _syslog_tag = os.environ.get('PI_SYSLOG_TAG', 'privacyidea')
+    _syslog_level = os.environ.get('PI_SYSLOG_LEVEL', 'INFO').upper()
+    _socktype = 'ext://socket.SOCK_STREAM' if _syslog_proto == 'tcp' else 'ext://socket.SOCK_DGRAM'
+
+    _fac_num = logging.handlers.SysLogHandler.facility_names.get(
+        _syslog_facility, logging.handlers.SysLogHandler.LOG_LOCAL1)
+
+    _log_cfg.setdefault('handlers', {})['syslog'] = {
+        'class': 'logging.handlers.SysLogHandler',
+        'address': [_syslog_host, _syslog_port],
+        'socktype': _socktype,
+        'facility': _fac_num,
+        'level': _syslog_level,
+        'formatter': 'syslog',
+    }
+    _log_cfg.setdefault('formatters', {})['syslog'] = {
+        'format': _syslog_tag + ': [%(levelname)s] %(name)s: %(message)s',
+    }
+
+    # Add syslog handler to root logger only (privacyidea logger propagates
+    # to root, so adding to both would duplicate every message).
+    _root = _log_cfg.setdefault('root', {})
+    _root_handlers = _root.get('handlers', [])
+    if 'syslog' not in _root_handlers:
+        _root_handlers.append('syslog')
+        _root['handlers'] = _root_handlers
+
+    with open(_log_cfg_out, 'w') as _f:
+        yaml.dump(_log_cfg, _f, default_flow_style=False)
+
+    os.environ['PI_LOGCONFIG'] = _log_cfg_out
+    print(f"[entrypoint] syslog enabled: {_syslog_tag} -> {_syslog_host}:{_syslog_port}/{_syslog_proto} "
+          f"facility={_syslog_facility} level={_syslog_level}")
 
 # Run the app using gunicorn WSGI HTTP server
 cmd = [ "python",

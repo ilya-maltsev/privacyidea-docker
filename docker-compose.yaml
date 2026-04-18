@@ -45,6 +45,14 @@ services:
         window: 60s
     env_file:
       - ${ENVIRONMENT}
+    environment:
+      PI_SYSLOG_ENABLED: ${PI_SYSLOG_ENABLED:-false}
+      PI_SYSLOG_HOST: ${PI_SYSLOG_HOST:-}
+      PI_SYSLOG_PORT: ${PI_SYSLOG_PORT:-514}
+      PI_SYSLOG_PROTO: ${PI_SYSLOG_PROTO:-udp}
+      PI_SYSLOG_FACILITY: ${PI_SYSLOG_FACILITY:-local1}
+      PI_SYSLOG_TAG: ${PI_SYSLOG_TAG:-privacyidea}
+      PI_SYSLOG_LEVEL: ${PI_SYSLOG_LEVEL:-INFO}
     ports:
       - "${PI_PORT:-8080}:${PI_PORT:-8080}"
     volumes:
