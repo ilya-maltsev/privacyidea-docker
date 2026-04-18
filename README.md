@@ -289,6 +289,46 @@ make cert fullstack
 > [!Note]
 > The ldap have sample users. The resolvers and realm are already configured in privacyIDEA when stack is ready.
 
+### Dev credentials (fullstack)
+
+The `fullstack` profile seeds OpenLDAP with sample users from `templates/sample.ldif`. Password is always the **givenName in lowercase**.
+
+**Built-in privacyIDEA DB admin** (created by `entrypoint.py`, not LDAP):
+
+| Login | Password |
+|-------|----------|
+| admin | admin |
+
+**LDAP system accounts:**
+
+| uid | Password | employeeType | Realm |
+|-----|----------|--------------|-------|
+| `admin` | `admin` | admin | admin |
+| `helpdesk` | `helpdesk` | helpdesk | helpdesk |
+
+**LDAP sample users** (employeeType=user, realm `exampleorg`):
+
+| uid | Password | uid | Password |
+|-----|----------|-----|----------|
+| AdaStu | ada | HarpMon | harpal |
+| LatrStr | latrena | HindBel | hinda |
+| OlivDon | olive | FaunCho | faun |
+| ShirUng | shir | DesHem | des |
+| ZiaBre | zia | AdelLie | adelina |
+| YoniHes | yonik | KaraVer | kara |
+| MeliPur | melicent | LorrDon | lorrin |
+| EnidMcS | enid | DoroGru | dorothy |
+| LyseLun | lyse | MandMic | mandana |
+| LureRee | lurette | NealMcS | neal |
+| PearKel | pearline | EsmaWes | esma |
+
+**LDAP helpdesk accounts** (realm `helpdesk`): ChauMee / chau, MarlLab / marleen, ThanCha / thane, SuziBel / suzi, EricMcL / erick, UlriTho / ulrikaumeko, MarlFel / marleen, AnnaKri / annadiane, RheaPer / rhea
+
+**LDAP admin accounts** (realm `admin`): admin / admin, MariUng / marissa, BertSuz / berthe, FaytPac / fayth
+
+> [!Note]
+> The OpenLDAP admin bind account is `cn=admin,dc=example,dc=org` with password `openldap`.
+
 Shutdown the stack with the project name *prod* and **remove** all resources (container,networks, etc.) except the volumes.
 
 ```
@@ -613,6 +653,29 @@ To dump the VPN Pooler database:
 ```
 docker exec -it prod-db-1 pg_dump -U vpn_pooler vpn_pooler
 ```
+
+## Changelog
+
+### Recent changes
+
+**Dev environment refactoring** (`dev_env_refact`)
+- Added `docker-compose.dev.yaml` override for subproject hot-reload: bind-mounts `pi-vpn-pooler` source into vpn_pooler container with gunicorn `--reload`, bind-mounts `privacyidea_radius.py` into freeradius container
+- Added `set_custom_user_attributes` and `delete_custom_user_attributes` permissions to the `superuser` admin policy in `resolver.json` (required for VPN Pooler IP allocation)
+
+**privacyIDEA syslog forwarding** (`pi-syslog`)
+- Added remote syslog support to the privacyIDEA application via `PI_SYSLOG_*` environment variables
+- `entrypoint.py` dynamically injects a `SysLogHandler` into `logging.cfg` at startup and writes the result to `logging_runtime.cfg`
+- `conf/pi.cfg` now reads `PI_LOGCONFIG` from env so the runtime config override takes effect
+
+**Centralized rsyslog service** (`rsyslog-service`)
+- Added `rsyslog` container (Alpine-based) to the `fullstack` profile — receives UDP/TCP 514 from all services on the internal Docker network
+- Per-service log files: `privacyidea.log`, `privacyidea-radius.log`, `pi-vpn-pooler.log`, `all.log` in the `rsyslog_logs` volume
+- `application-dev.env` pre-configures all three services to forward to the rsyslog container
+
+**Syslog support for subprojects** (`syslog`)
+- Added remote syslog forwarding to the rlm_python3 FreeRADIUS plugin (`RADIUS_SYSLOG_*` env vars) with DEBUG packet dumps, secret redaction, and accounting handler
+- Added remote syslog forwarding to pi-vpn-pooler Django app (`VPN_POOLER_SYSLOG_*` env vars) with DEBUG HTTP request/response logging and secret redaction
+- Fixed `instantiate()` crash in rlm_python3 when FreeRADIUS passes `None` config (`dict(p)` → `dict(p) if p else {}`)
 
 # Disclaimer
 
