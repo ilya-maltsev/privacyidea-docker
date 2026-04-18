@@ -187,6 +187,18 @@ services:
       - fullstack
       - stack
 
+  rsyslog:
+    build:
+      context: ./templates/rsyslog
+    image: privacyidea-rsyslog:latest
+    volumes:
+      - rsyslog_logs:/var/log/remote
+    networks:
+      - privacyidea
+    restart: always
+    profiles:
+      - fullstack
+
   openldap:
     image: osixia/openldap:latest
     environment:
@@ -222,6 +234,7 @@ volumes:
   pgdata: {}
   pidata: {}
   vpn_pooler_static: {}
+  rsyslog_logs: {}
  
 networks:
   privacyidea: {}
