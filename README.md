@@ -369,8 +369,15 @@ The nginx `reverse_proxy` terminates TLS for **both** privacyIDEA (host `${PROXY
 ```RADIUS_PI_REALM```| | privacyIDEA realm for RADIUS authentication
 ```RADIUS_PI_RESCONF```| | privacyIDEA resolver configuration for RADIUS
 ```RADIUS_PI_SSLCHECK```| false | Enable SSL certificate verification for privacyIDEA API
-```RADIUS_DEBUG```| false | Enable debug logging in FreeRADIUS plugin
+```RADIUS_DEBUG```| false | Enable DEBUG-level logging in the rlm_python3 plugin. When `true`, dumps the full incoming RADIUS request, URL params, HTTP request/response packets to privacyIDEA, and the outgoing RADIUS reply. See [Syslog and DEBUG logging](#syslog-and-debug-logging).
 ```RADIUS_PI_TIMEOUT```| 10 | Timeout (seconds) for privacyIDEA API requests
+```RADIUS_SYSLOG```| true | Enable syslog output from the rlm_python3 plugin (in addition to `radiusd.radlog`). When `false`, logs only go to the FreeRADIUS log.
+```RADIUS_SYSLOG_HOST```| *(empty)* | Remote rsyslog host. Empty uses the local syslogd inside the container.
+```RADIUS_SYSLOG_PORT```| 514 | Remote rsyslog port.
+```RADIUS_SYSLOG_PROTO```| udp | Transport for remote rsyslog: `udp` or `tcp`.
+```RADIUS_SYSLOG_FACILITY```| auth | Syslog facility: `auth`, `authpriv`, `daemon`, `local0`..`local7`.
+```RADIUS_SYSLOG_TAG```| privacyidea-radius | Syslog program name / ident.
+```RADIUS_SYSLOG_LEVEL```| INFO | Minimum level forwarded to syslog: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. Must be `DEBUG` to see full-packet dumps from `RADIUS_DEBUG=true`.
 
 ### VPN Pooler parameters (for compose/vpn_pooler)
 | Variable | Default | Description
@@ -385,6 +392,13 @@ The nginx `reverse_proxy` terminates TLS for **both** privacyIDEA (host `${PROXY
 ```VPN_POOLER_DJANGO_ALLOWED_HOSTS```| * | Django allowed hosts
 ```VPN_POOLER_CSRF_TRUSTED_ORIGINS```| https://localhost:5443 | CSRF trusted origins
 ```VPN_POOLER_PORT```| 5443 | Exposed port for VPN Pooler
+```VPN_POOLER_SYSLOG_ENABLED```| false | Enable remote syslog forwarding from Django. When `false`, logs only go to stdout / container logs.
+```VPN_POOLER_SYSLOG_HOST```| *(empty)* | Remote rsyslog host. Required when `VPN_POOLER_SYSLOG_ENABLED=true`.
+```VPN_POOLER_SYSLOG_PORT```| 514 | Remote rsyslog port.
+```VPN_POOLER_SYSLOG_PROTO```| udp | Transport for remote rsyslog: `udp` or `tcp`.
+```VPN_POOLER_SYSLOG_FACILITY```| local0 | Syslog facility.
+```VPN_POOLER_SYSLOG_TAG```| pi-vpn-pooler | Syslog program name / ident.
+```VPN_POOLER_SYSLOG_LEVEL```| INFO | Minimum level forwarded: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. Set to `DEBUG` to capture full HTTP request/response packets against the privacyIDEA API. See [Syslog and DEBUG logging](#syslog-and-debug-logging).
 
 ### LDAP parameters (for compose/fullstack)
 | Variable | Default | Description
@@ -403,6 +417,62 @@ The nginx `reverse_proxy` service serves TLS on two ports (privacyIDEA `:443`, V
 
 - **Dev**: `make cert` generates `templates/pi.pem` + `templates/pi.key`; compose bind-mounts them to `/etc/nginx/ssl/pi.pem` + `/etc/nginx/ssl/pi.key`, and `NGINX_TLS_CERT_PATH` / `NGINX_TLS_KEY_PATH` default to those paths.
 - **Prod**: mount your real certificate and key into the `reverse_proxy` container (additional bind mount, Docker secret, or your orchestrator's equivalent) and set `NGINX_TLS_CERT_PATH` / `NGINX_TLS_KEY_PATH` in `application-prod.env` to the container-side paths. Use PEM without a passphrase; `.pfx` is not supported.
+
+## Syslog and DEBUG logging
+
+Both the **rlm_python3** RADIUS plugin and the **pi-vpn-pooler** Django app can forward application logs to an external rsyslog server. Everything is configurable via the `*_SYSLOG_*` environment variables described in the [RADIUS](#radius-parameters-for-composefullstack) and [VPN Pooler](#vpn-pooler-parameters-for-composevpn_pooler) tables above. Defaults: transport `udp`, port `514`, level `INFO`; remote forwarding is off until a host is set (RADIUS auto-uses local syslogd; VPN Pooler requires `VPN_POOLER_SYSLOG_ENABLED=true`).
+
+### Two log tiers
+
+| Level | What you get |
+|-------|--------------|
+| `INFO` (default) | One-line operational events per request: auth result, challenge issued, token serial on success, accounting start/stop, pool allocate/release, sync start/complete, PI internal errors, login failures. Safe for production. |
+| `DEBUG` | Everything at INFO, plus full-packet dumps (see below). Verbose — intended for troubleshooting. |
+
+### Full-packet DEBUG dumps
+
+When `RADIUS_DEBUG=true` **and** `RADIUS_SYSLOG_LEVEL=DEBUG` (or inspecting the FreeRADIUS log), the rlm_python3 plugin logs:
+
+- Every incoming RADIUS attribute (`RAD_REQUEST:`) and accounting attribute (`ACCT_REQUEST:`)
+- Every URL parameter built for privacyIDEA (`urlparam`)
+- The full outbound HTTP request: method, URL, headers, body (`PI HTTP >>>`)
+- The full inbound HTTP response: status, reason, headers, body (`PI HTTP <<<`)
+- The full outbound RADIUS reply: return code, reply pairs, config pairs (`RADIUS reply <<<`)
+
+With `VPN_POOLER_SYSLOG_LEVEL=DEBUG` (or Django `DEBUG=true`), the pi-vpn-pooler `PIClient` logs `PI HTTP >>>` / `PI HTTP <<<` for every call to the privacyIDEA API — method, URL, headers, query params, body, response status, response body.
+
+### Secret redaction
+
+Packet dumps are **redacted by default** — this is not a toggle. The plugin and the pooler both strip values of any attribute, header, URL param, or JSON field whose name (case-insensitive) contains:
+
+`password`, `pass`, `chap-challenge`, `chap-response`, `chap-password`, `mschap`, `ms-chap`, `authorization`, `pi-authorization`, `cookie`, `token`, `secret`
+
+Matched values are replaced with `***` before the message is emitted. This covers `User-Password`, CHAP/MS-CHAP material, the `PI-Authorization` JWT header, the `token` field in `/auth` responses, and any key the NAS or privacyIDEA returns that matches a secret substring. JSON response bodies are parsed and redacted recursively; bodies that fail to parse are logged verbatim.
+
+> [!Note]
+> The redaction list is conservative, not exhaustive. Review the DEBUG output in a test environment before forwarding to a central log aggregator in production.
+
+### Quick test
+
+Start a UDP listener on the host and point a stack at it:
+
+```
+nc -u -l 1514
+```
+
+Then in your env file:
+
+```
+RADIUS_SYSLOG_HOST=host.docker.internal
+RADIUS_SYSLOG_PORT=1514
+RADIUS_SYSLOG_LEVEL=DEBUG
+RADIUS_DEBUG=true
+
+VPN_POOLER_SYSLOG_ENABLED=true
+VPN_POOLER_SYSLOG_HOST=host.docker.internal
+VPN_POOLER_SYSLOG_PORT=1514
+VPN_POOLER_SYSLOG_LEVEL=DEBUG
+```
 
 ## Security considerations
 
