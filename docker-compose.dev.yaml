@@ -1,5 +1,5 @@
 # Dev overrides — bind-mount subproject source code and enable auto-reload.
-# Allows editing rlm_python3 and pi-vpn-pooler locally without rebuilding images.
+# Allows editing rlm_python3, pi-vpn-pooler and pi-custom-captive locally without rebuilding images.
 #
 # Usage:
 #   docker compose --env-file environment/application-dev.env \
@@ -24,6 +24,22 @@ services:
       - -c
       - >-
         python manage.py migrate --noinput &&
+        python manage.py collectstatic --noinput 2>/dev/null;
+        gunicorn config.wsgi:application
+        --bind 0.0.0.0:8000
+        --workers 1
+        --reload
+        --timeout 120
+
+  captive:
+    volumes:
+      - type: bind
+        source: ./pi-custom-captive
+        target: /app
+    command:
+      - sh
+      - -c
+      - >-
         python manage.py collectstatic --noinput 2>/dev/null;
         gunicorn config.wsgi:application
         --bind 0.0.0.0:8000

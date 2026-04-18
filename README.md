@@ -40,10 +40,11 @@ Username / password: admin / admin
 | *templates/rsyslog*| Dockerfile and config for the rsyslog log-collector container (fullstack profile only).|
 | *rlm_python3*| git submodule — [FreeRADIUS rlm_python3 plugin](https://github.com/ilya-maltsev/rlm_python3) for privacyIDEA authentication. Replaces the legacy Perl-based rlm_perl plugin.|
 | *pi-vpn-pooler*| git submodule — [VPN IP pool manager](https://github.com/ilya-maltsev/pi-vpn-pooler) that integrates with privacyIDEA API.|
+| *pi-custom-captive*| git submodule — [custom captive portal](https://github.com/ilya-maltsev/pi-custom-captive) for self-service TOTP (Google Authenticator) enrollment with narrow admin token management. One-shot: a user can enroll exactly once and is then locked out until an administrator deletes/unassigns the token.|
 
 ## Submodules
 
-This project uses git submodules for the FreeRADIUS plugin and VPN Pooler service. When cloning, use `--recurse-submodules`:
+This project uses git submodules for the FreeRADIUS plugin, VPN Pooler service, and Captive Portal. When cloning, use `--recurse-submodules`:
 
 ```
 git clone --recurse-submodules https://github.com/ilya-maltsev/privacyidea-docker.git
@@ -120,6 +121,7 @@ make build PI_VERSION=3.13 PI_VERSION_BUILD=3.13
 | `privacyidea-docker:3.13` | `./Dockerfile` | privacyIDEA application |
 | `privacyidea-freeradius:latest` | `./rlm_python3/` (submodule) | FreeRADIUS with rlm_python3 plugin |
 | `pi-vpn-pooler:latest` | `./pi-vpn-pooler/` (submodule) | VPN IP pool manager |
+| `pi-custom-captive:latest` | `./pi-custom-captive/` (submodule) | Self-service TOTP captive portal |
 | `privacyidea-rsyslog:latest` | `./templates/rsyslog/` | Centralized rsyslog collector (fullstack only) |
 
 ### Infrastructure images (pulled from registry)
@@ -155,12 +157,12 @@ make distclean
 | target | optional ARGS | description | example
 ---------|----------|---|---------
 | ```build ``` | ```PI_VERSION```<br> ```IMAGE_NAME```|Build the privacyIDEA image. Optional: specify the version and image name| ```make build PI_VERSION=3.13 PI_VERSION_BUILD=3.13```|
-| ```build-all``` | |Build all images (privacyIDEA, FreeRADIUS, VPN Pooler, rsyslog) and pull infrastructure images| ```make build-all```|
+| ```build-all``` | |Build all images (privacyIDEA, FreeRADIUS, VPN Pooler, Captive Portal, rsyslog) and pull infrastructure images| ```make build-all```|
 | ```push``` | ```REGISTRY```|Tag and push the image to the registry. Optional: specify the registry URI. Defaults to *localhost:5000*| ```make push REGISTRY=docker.io/your-registry/privacyidea-docker```|
 | ```run``` |  ```PORT``` <br> ```TAG```  |Run a standalone container with gunicorn and sqlite. Optional: specify the prefix tag of the container name and listen port. Defaults to *pi* and port *8080*| ```make run TAG=prod PORT=8888```|
 | ```secret``` | |Generate secrets to use in an environment file | ```make secret```|
 | ```cert``` | |Generate a self-signed certificate for the reverse proxy container in *./templates* and **overwrite** the existing one | ```make cert```|
-| ```stack``` |```TAG``` ```PROFILE```| Run a production stack (db, privacyidea, reverse_proxy, freeradius, vpn_pooler). Default profile is *stack*. | ```make stack```, ```make stack TAG=dev PROFILE=fullstack```|
+| ```stack``` |```TAG``` ```PROFILE```| Run a production stack (db, privacyidea, reverse_proxy, freeradius, vpn_pooler, captive). Default profile is *stack*. | ```make stack```, ```make stack TAG=dev PROFILE=fullstack```|
 | ```fullstack``` || Run a full dev/test stack (all stack services + LDAP + rsyslog) | ```make fullstack```
 | ```resolver``` || Create resolvers and realm for fullstack | ```make resolver```
 | ```clean``` |```TAG```| Remove the container and network without removing the named volumes. Optional: change prefix tag of the container name. Defaults to *prod* | ```make clean TAG=prod```|
@@ -182,6 +184,7 @@ graph TD;
   w2(RADIUS 1812);
   w3(LDAP 1389);
   w7(https://localhost:5443);
+  w8(https://localhost:6443);
   subgraph s1 [ ];
        r1(RADIUS<br/>rlm_python3);
        n1(NGINX<br/>reverse proxy);
@@ -189,6 +192,7 @@ graph TD;
        n3(privacyIDEA);
        n4(PostgreSQL);
        vpn1(VPN Pooler);
+       cap1(Captive Portal);
        syslog1(rsyslog<br/>fullstack only);
   st1[Stack];
   end;
@@ -197,15 +201,18 @@ graph TD;
   a1~~~w2;
   a1~~~w3;
   a1~~~w7;
+  a1~~~w8;
 
   w1<-- API / WebUI -->n1<-- ":443 → :8080" -->n3<-->n4
   w2<-- radius auth -->r1<-- "PI API via NGINX" -->n1
   w3<-- for clients -->n2<-- resolver -->n3
   w7<-- VPN pool mgmt -->n1<-- ":444 → :8000" -->vpn1<-- "PI API via NGINX" -->n1
+  w8<-- TOTP self-enrol -->n1<-- ":445 → :8000" -->cap1<-- "PI API via NGINX" -->n1
   vpn1<-->n4
   n3-. "syslog udp/514" .->syslog1
   r1-. "syslog udp/514" .->syslog1
   vpn1-. "syslog udp/514" .->syslog1
+  cap1-. "syslog udp/514" .->syslog1
 
   classDef plain font-size:12px,fill:#ddd,stroke:#fff,stroke-width:4px,color:#000;
   classDef heading font-size:12px,fill:#9db668,stroke:#fff,stroke-width:1px,color:#fff;
@@ -214,8 +221,8 @@ graph TD;
   classDef second fill:#dba614,stroke:#fff,stroke-width:2px,color:#fff;
   classDef logging fill:#8b5e3c,stroke:#fff,stroke-width:2px,color:#fff;
   classDef cluster fill:#fff,stroke:#888,stroke-width:2px,color:#265a88;
-  class w1,w2,w3,w7 plain;
-  class r1,n2,vpn1 second;
+  class w1,w2,w3,w7,w8 plain;
+  class r1,n2,vpn1,cap1 second;
   class n1,n3,n4 docker;
   class syslog1 logging;
   class s1 title;
@@ -228,7 +235,7 @@ Find example .env files in the *environment* directory.
 
 | Profile | Services | Use case |
 |---------|----------|----------|
-| `stack` | db, privacyidea, reverse_proxy, freeradius, vpn_pooler | **Production** — full working set without LDAP |
+| `stack` | db, privacyidea, reverse_proxy, freeradius, vpn_pooler, captive | **Production** — full working set without LDAP |
 | `fullstack` | all `stack` services + openldap, rsyslog | **Dev/testing** — includes LDAP with sample data and centralized log collection |
 | `ldap` | openldap | LDAP directory only (add to other profiles) |
 
@@ -236,7 +243,7 @@ Find example .env files in the *environment* directory.
 > **Dev-only resolver seed.** `application-dev.env` sets `PI_SEED_RESOLVERS=true`, which tells `entrypoint.py` to run `pi-manage config import -i /privacyidea/etc/persistent/resolver.json` on first boot. The seed is idempotent (gated on a `resolver_imported` flag file) and is **not** enabled in `application-prod.env` — prod stacks start with an empty privacyIDEA configuration.
 
 > [!Note]
-> **Dev-only rsyslog collector.** The `fullstack` profile includes an `rsyslog` container that receives syslog messages (UDP 514) from privacyIDEA, FreeRADIUS and VPN Pooler on the internal Docker network. Logs are written to per-service files inside the `rsyslog_logs` volume (`privacyidea.log`, `privacyidea-radius.log`, `pi-vpn-pooler.log`, `all.log`). `application-dev.env` pre-configures all three services to forward to this collector. The `stack` (production) profile does **not** include rsyslog — configure your own external rsyslog host via the `*_SYSLOG_HOST` variables instead.
+> **Dev-only rsyslog collector.** The `fullstack` profile includes an `rsyslog` container that receives syslog messages (UDP 514) from privacyIDEA, FreeRADIUS, VPN Pooler and Captive Portal on the internal Docker network. Logs are written to per-service files inside the `rsyslog_logs` volume (`privacyidea.log`, `privacyidea-radius.log`, `pi-vpn-pooler.log`, `pi-custom-captive.log`, `all.log`). `application-dev.env` pre-configures all four services to forward to this collector. The `stack` (production) profile does **not** include rsyslog — configure your own external rsyslog host via the `*_SYSLOG_HOST` variables instead.
 
 ### Exposed ports (stack profile)
 
@@ -246,16 +253,18 @@ Find example .env files in the *environment* directory.
 | privacyidea | `${PI_PORT:-8080}` | tcp | Direct gunicorn (use reverse_proxy for production) |
 | reverse_proxy (privacyIDEA) | `${PROXY_PORT:-8443}` | tcp (HTTPS) | NGINX SSL termination → privacyIDEA :8080 |
 | reverse_proxy (VPN Pooler) | `${VPN_POOLER_PORT:-5443}` | tcp (HTTPS) | NGINX SSL termination → VPN Pooler :8000 |
+| reverse_proxy (Captive Portal) | `${CAPTIVE_PORT:-6443}` | tcp (HTTPS) | NGINX SSL termination → Captive Portal :8000 |
 | freeradius | `${RADIUS_PORT:-1812}` | tcp + udp | RADIUS authentication |
 | freeradius | `${RADIUS_PORT_INC:-1813}` | udp | RADIUS accounting |
 
 > [!Note]
-> Both privacyIDEA and VPN Pooler are plain HTTP services behind the NGINX reverse proxy which terminates TLS. The `vpn_pooler` container only exposes port 8000 internally and is **not** published to the host — all external access goes through `reverse_proxy` on `${VPN_POOLER_PORT}`.
+> privacyIDEA, VPN Pooler and Captive Portal are plain HTTP services behind the NGINX reverse proxy which terminates TLS. The `vpn_pooler` and `captive` containers only expose port 8000 internally and are **not** published to the host — all external access goes through `reverse_proxy` on `${VPN_POOLER_PORT}` / `${CAPTIVE_PORT}`.
 
 - The openldap container is only available with `fullstack` or `ldap` profiles (dev/testing only).
 - The rsyslog container is only available with the `fullstack` profile (dev/testing only). It does not expose any ports to the host.
 - The radius container is built locally from the [rlm_python3](https://github.com/ilya-maltsev/rlm_python3) submodule.
 - The VPN Pooler is built locally from the [pi-vpn-pooler](https://github.com/ilya-maltsev/pi-vpn-pooler) submodule.
+- The Captive Portal is built locally from the [pi-custom-captive](https://github.com/ilya-maltsev/pi-custom-captive) submodule.
 - The openldap uses the [osixia/docker-openldap](https://github.com/osixia/docker-openldap) image.
 
 ---
@@ -275,7 +284,7 @@ Run a stack with project the name *prod* and environment variables files from *e
 ```
 Or simple run a ```make``` target.
 
-This example will start a production stack including **PostgreSQL**, **privacyIDEA**, **reverse_proxy**, **FreeRADIUS** and **VPN Pooler**:
+This example will start a production stack including **PostgreSQL**, **privacyIDEA**, **reverse_proxy**, **FreeRADIUS**, **VPN Pooler** and **Captive Portal**:
 ```
 make cert stack
 ```
@@ -348,11 +357,12 @@ make cert build-all stack PI_VERSION=3.13 PI_VERSION_BUILD=3.13 TAG=pidev
 
 ### Dev mode with hot-reload (subprojects)
 
-`docker-compose.dev.yaml` is an override file that bind-mounts the **rlm_python3** and **pi-vpn-pooler** source code into the running containers. This lets you edit Python files locally and see changes applied without rebuilding images.
+`docker-compose.dev.yaml` is an override file that bind-mounts the **rlm_python3**, **pi-vpn-pooler** and **pi-custom-captive** source code into the running containers. This lets you edit Python files locally and see changes applied without rebuilding images.
 
 | Service | What is mounted | Hot-reload |
 |---------|----------------|------------|
 | **vpn_pooler** | `./pi-vpn-pooler` → `/app` | Yes — gunicorn `--reload` restarts workers automatically on file changes |
+| **captive** | `./pi-custom-captive` → `/app` | Yes — gunicorn `--reload` restarts workers automatically on file changes |
 | **freeradius** | `./rlm_python3/privacyidea_radius.py` → plugin path | No — FreeRADIUS loads the Python module once at startup. Container restart required: `docker compose restart freeradius` |
 
 Usage:
@@ -364,7 +374,7 @@ docker compose --env-file environment/application-dev.env \
 ```
 
 > [!Note]
-> The override reduces vpn_pooler to a single gunicorn worker with `--reload` enabled. This is intended for development only — do not use `docker-compose.dev.yaml` in production.
+> The override reduces vpn_pooler and captive to a single gunicorn worker with `--reload` enabled. This is intended for development only — do not use `docker-compose.dev.yaml` in production.
 
 ---
 Now you can deploy additional containers like OpenLDAP for user realms or Owncloud as a client to test 2FA authentication. 
@@ -389,6 +399,9 @@ A single PostgreSQL instance is shared between privacyIDEA and VPN Pooler. Each 
 | `vpn_pooler` | `vpn_pooler` | VPN Pooler |
 
 The VPN Pooler database and user are created automatically on first start via the init script `templates/init-vpn-pooler-db.sh`.
+
+> [!Note]
+> The Captive Portal is **stateless** — it has no local database. All user/token state lives in privacyIDEA, and the portal emits every action as syslog events (see [Syslog and DEBUG logging](#syslog-and-debug-logging)).
 
 > [!Note]
 > privacyIDEA uses `psycopg2` as the PostgreSQL adapter. Since privacyIDEA 3.3, the PostgreSQL adapter is not included in the default installation (see [privacyIDEA FAQ](https://privacyidea.readthedocs.io/en/stable/faq/mysqldb.html)). This project installs `psycopg2-binary` explicitly in the Dockerfile.
@@ -434,7 +447,7 @@ The VPN Pooler database and user are created automatically on first start via th
 
 ### Reverse proxy parameters (for compose/stack)
 
-The nginx `reverse_proxy` terminates TLS for **both** privacyIDEA (host `${PROXY_PORT}` → container `:443`) and VPN Pooler (host `${VPN_POOLER_PORT}` → container `:444`), using the same certificate pair. The `vpn_pooler` container speaks plain HTTP on `:8000` inside the compose network and is not published to the host.
+The nginx `reverse_proxy` terminates TLS for privacyIDEA (host `${PROXY_PORT}` → container `:443`), VPN Pooler (host `${VPN_POOLER_PORT}` → container `:444`) and Captive Portal (host `${CAPTIVE_PORT}` → container `:445`), using the same certificate pair. The `vpn_pooler` and `captive` containers speak plain HTTP on `:8000` inside the compose network and are not published to the host.
 
 | Variable | Default | Description
 |-----|---------|-------------
@@ -482,6 +495,31 @@ The nginx `reverse_proxy` terminates TLS for **both** privacyIDEA (host `${PROXY
 ```VPN_POOLER_SYSLOG_TAG```| pi-vpn-pooler | Syslog program name / ident.
 ```VPN_POOLER_SYSLOG_LEVEL```| INFO | Minimum level forwarded: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. Set to `DEBUG` to capture full HTTP request/response packets against the privacyIDEA API. See [Syslog and DEBUG logging](#syslog-and-debug-logging).
 
+### Captive Portal parameters (for compose/captive)
+
+The captive portal is stateless (no DB). It requires a privacyIDEA **service account** with admin rights, used to list/create/delete TOTP tokens via the PI REST API. A regular user logs in to the portal with their own AD/LDAP password; once the user has at least one active TOTP token in PI, the portal permanently refuses them until an administrator removes the token. Admin area access requires both a PI admin password **and** an already-enrolled admin TOTP.
+
+| Variable | Default | Description
+|-----|---------|-------------
+```CAPTIVE_PI_API_URL```| https://reverse_proxy:443 | privacyIDEA API URL the captive portal calls
+```CAPTIVE_PI_VERIFY_SSL```| false | Verify SSL certificate of the privacyIDEA API
+```CAPTIVE_PI_REALM```| defrealm | The **only** realm the captive portal operates in (single-realm by design)
+```CAPTIVE_PI_SERVICE_USER```| *(empty)* | privacyIDEA admin username used by the portal to list/init/delete tokens. Required.
+```CAPTIVE_PI_SERVICE_PASSWORD```| *(empty)* | Password for the service account. Required.
+```CAPTIVE_DJANGO_SECRET_KEY```| changeme | Django secret key. Use `make secrets` inside the submodule to generate one.
+```CAPTIVE_DJANGO_DEBUG```| false | Enable Django debug mode
+```CAPTIVE_DJANGO_ALLOWED_HOSTS```| * | Django allowed hosts
+```CAPTIVE_CSRF_TRUSTED_ORIGINS```| https://localhost:6443 | CSRF trusted origins
+```CAPTIVE_DJANGO_LOG_LEVEL```| INFO | Django log level
+```CAPTIVE_PORT```| 6443 | Exposed (external) HTTPS port mapped to the reverse-proxy `:445` listener
+```CAPTIVE_SYSLOG_ENABLED```| false | Enable remote syslog forwarding. When `false`, logs only go to stdout / container logs.
+```CAPTIVE_SYSLOG_HOST```| *(empty)* | Remote rsyslog host. Required when `CAPTIVE_SYSLOG_ENABLED=true`.
+```CAPTIVE_SYSLOG_PORT```| 514 | Remote rsyslog port.
+```CAPTIVE_SYSLOG_PROTO```| udp | Transport for remote rsyslog: `udp` or `tcp`.
+```CAPTIVE_SYSLOG_FACILITY```| local2 | Syslog facility.
+```CAPTIVE_SYSLOG_TAG```| pi-custom-captive | Syslog program name / ident.
+```CAPTIVE_SYSLOG_LEVEL```| INFO | Minimum level forwarded: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. Set to `DEBUG` to capture full HTTP request/response packets against the privacyIDEA API. See [Syslog and DEBUG logging](#syslog-and-debug-logging).
+
 ### LDAP parameters (for compose/fullstack)
 | Variable | Default | Description
 |-----|---------|-------------
@@ -495,17 +533,17 @@ The nginx `reverse_proxy` terminates TLS for **both** privacyIDEA (host `${PROXY
 
 #### Certificates
 
-The nginx `reverse_proxy` service serves TLS on two ports (privacyIDEA `:443`, VPN Pooler `:444`) from a single cert/key pair.
+The nginx `reverse_proxy` service serves TLS on three ports (privacyIDEA `:443`, VPN Pooler `:444`, Captive Portal `:445`) from a single cert/key pair.
 
 - **Dev**: `make cert` generates `templates/pi.pem` + `templates/pi.key`; compose bind-mounts them to `/etc/nginx/ssl/pi.pem` + `/etc/nginx/ssl/pi.key`, and `NGINX_TLS_CERT_PATH` / `NGINX_TLS_KEY_PATH` default to those paths.
 - **Prod**: mount your real certificate and key into the `reverse_proxy` container (additional bind mount, Docker secret, or your orchestrator's equivalent) and set `NGINX_TLS_CERT_PATH` / `NGINX_TLS_KEY_PATH` in `application-prod.env` to the container-side paths. Use PEM without a passphrase; `.pfx` is not supported.
 
 ## Syslog and DEBUG logging
 
-The **privacyIDEA** application, the **rlm_python3** RADIUS plugin, and the **pi-vpn-pooler** Django app can all forward application logs to an rsyslog server. Everything is configurable via the `PI_SYSLOG_*` / `RADIUS_SYSLOG_*` / `VPN_POOLER_SYSLOG_*` environment variables described in the [privacyIDEA](#privacyidea), [RADIUS](#radius-parameters-for-composefullstack) and [VPN Pooler](#vpn-pooler-parameters-for-composevpn_pooler) tables above. Defaults: transport `udp`, port `514`, level `INFO`; remote forwarding is off until a host is set.
+The **privacyIDEA** application, the **rlm_python3** RADIUS plugin, the **pi-vpn-pooler** Django app and the **pi-custom-captive** Django app can all forward application logs to an rsyslog server. Everything is configurable via the `PI_SYSLOG_*` / `RADIUS_SYSLOG_*` / `VPN_POOLER_SYSLOG_*` / `CAPTIVE_SYSLOG_*` environment variables described in the [privacyIDEA](#privacyidea), [RADIUS](#radius-parameters-for-composefullstack), [VPN Pooler](#vpn-pooler-parameters-for-composevpn_pooler) and [Captive Portal](#captive-portal-parameters-for-composecaptive) tables above. Defaults: transport `udp`, port `514`, level `INFO`; remote forwarding is off until a host is set.
 
-- **Dev (fullstack)**: the `rsyslog` container is included in the stack and `application-dev.env` pre-configures all three services to forward to it. Logs are written to the `rsyslog_logs` volume as per-service text files (`privacyidea.log`, `privacyidea-radius.log`, `pi-vpn-pooler.log`, `all.log`).
-- **Prod (stack)**: no rsyslog container is included. Set `PI_SYSLOG_HOST` / `RADIUS_SYSLOG_HOST` / `VPN_POOLER_SYSLOG_HOST` to your own syslog infrastructure.
+- **Dev (fullstack)**: the `rsyslog` container is included in the stack and `application-dev.env` pre-configures all four services to forward to it. Logs are written to the `rsyslog_logs` volume as per-service text files (`privacyidea.log`, `privacyidea-radius.log`, `pi-vpn-pooler.log`, `pi-custom-captive.log`, `all.log`).
+- **Prod (stack)**: no rsyslog container is included. Set `PI_SYSLOG_HOST` / `RADIUS_SYSLOG_HOST` / `VPN_POOLER_SYSLOG_HOST` / `CAPTIVE_SYSLOG_HOST` to your own syslog infrastructure.
 
 ### Two log tiers
 
@@ -525,6 +563,8 @@ When `RADIUS_DEBUG=true` **and** `RADIUS_SYSLOG_LEVEL=DEBUG` (or inspecting the 
 - The full outbound RADIUS reply: return code, reply pairs, config pairs (`RADIUS reply <<<`)
 
 With `VPN_POOLER_SYSLOG_LEVEL=DEBUG` (or Django `DEBUG=true`), the pi-vpn-pooler `PIClient` logs `PI HTTP >>>` / `PI HTTP <<<` for every call to the privacyIDEA API — method, URL, headers, query params, body, response status, response body.
+
+With `CAPTIVE_SYSLOG_LEVEL=DEBUG` (or Django `DEBUG=true`), the pi-custom-captive `PIClient` emits the same `PI HTTP >>>` / `PI HTTP <<<` packet dumps for every call to `/auth`, `/token`, `/token/init`, `/token/<serial>`, `/token/enable`, `/token/disable` and `/validate/check`. Every user and admin action (login attempt, lockout hit, token enrol, token verify, admin password OK, admin OTP OK, token enable/disable/delete) is logged at INFO level with the acting user, target user, token serial, and client IP.
 
 ### Secret redaction
 
@@ -550,6 +590,7 @@ Per-service files:
 - `/var/log/remote/privacyidea.log`
 - `/var/log/remote/privacyidea-radius.log`
 - `/var/log/remote/pi-vpn-pooler.log`
+- `/var/log/remote/pi-custom-captive.log`
 - `/var/log/remote/all.log` (combined)
 
 ### Quick test (stack / manual)

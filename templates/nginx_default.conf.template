@@ -15,6 +15,10 @@ http {
     server vpn_pooler:8000 fail_timeout=2;
   }
 
+  upstream captive_server {
+    server captive:8000 fail_timeout=2;
+  }
+
   server {
     listen 443 ssl http2;
     client_max_body_size 4G;
@@ -79,6 +83,28 @@ http {
       proxy_redirect off;
       proxy_buffering off;
       proxy_pass http://vpn_pooler_server;
+    }
+  }
+
+  server {
+    listen 445 ssl http2;
+    client_max_body_size 4G;
+
+    server_name $SERVERNAME;
+    ssl_certificate $SSL_CERT;
+    ssl_certificate_key $SSL_KEY;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+
+    keepalive_timeout 5;
+
+    location / {
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $scheme;
+      proxy_set_header Host $http_host;
+      proxy_redirect off;
+      proxy_buffering off;
+      proxy_pass http://captive_server;
     }
   }
 }

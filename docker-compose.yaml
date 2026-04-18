@@ -91,6 +91,7 @@ services:
     ports:
       - "${PROXY_PORT}:443"
       - "${VPN_POOLER_PORT:-5443}:444"
+      - "${CAPTIVE_PORT:-6443}:445"
     volumes:
       - type: bind
         source: ./templates/nginx.conf
@@ -195,6 +196,39 @@ services:
       - fullstack
       - stack
 
+  captive:
+    build:
+      context: ./pi-custom-captive
+    image: pi-custom-captive:latest
+    environment:
+      PI_API_URL: ${CAPTIVE_PI_API_URL:-https://reverse_proxy:443}
+      PI_VERIFY_SSL: ${CAPTIVE_PI_VERIFY_SSL:-false}
+      PI_REALM: ${CAPTIVE_PI_REALM:-defrealm}
+      PI_SERVICE_USER: ${CAPTIVE_PI_SERVICE_USER:-}
+      PI_SERVICE_PASSWORD: ${CAPTIVE_PI_SERVICE_PASSWORD:-}
+      DJANGO_SECRET_KEY: ${CAPTIVE_DJANGO_SECRET_KEY:-changeme}
+      DJANGO_DEBUG: ${CAPTIVE_DJANGO_DEBUG:-false}
+      DJANGO_ALLOWED_HOSTS: ${CAPTIVE_DJANGO_ALLOWED_HOSTS:-*}
+      CSRF_TRUSTED_ORIGINS: ${CAPTIVE_CSRF_TRUSTED_ORIGINS:-https://localhost:6443}
+      DJANGO_LOG_LEVEL: ${CAPTIVE_DJANGO_LOG_LEVEL:-INFO}
+      SYSLOG_ENABLED: ${CAPTIVE_SYSLOG_ENABLED:-false}
+      SYSLOG_HOST: ${CAPTIVE_SYSLOG_HOST:-}
+      SYSLOG_PORT: ${CAPTIVE_SYSLOG_PORT:-514}
+      SYSLOG_PROTO: ${CAPTIVE_SYSLOG_PROTO:-udp}
+      SYSLOG_FACILITY: ${CAPTIVE_SYSLOG_FACILITY:-local2}
+      SYSLOG_TAG: ${CAPTIVE_SYSLOG_TAG:-pi-custom-captive}
+      SYSLOG_LEVEL: ${CAPTIVE_SYSLOG_LEVEL:-INFO}
+    volumes:
+      - captive_static:/app/staticfiles
+    expose:
+      - "8000"
+    networks:
+      - privacyidea
+    restart: always
+    profiles:
+      - fullstack
+      - stack
+
   rsyslog:
     build:
       context: ./templates/rsyslog
@@ -242,6 +276,7 @@ volumes:
   pgdata: {}
   pidata: {}
   vpn_pooler_static: {}
+  captive_static: {}
   rsyslog_logs: {}
  
 networks:

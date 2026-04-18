@@ -16,7 +16,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ARCHIVE="${SCRIPT_DIR}/privacyidea-images.tar.gz"
 
 # Application images (locally built)
-APP_IMAGES="privacyidea-docker:3.13 privacyidea-freeradius:latest pi-vpn-pooler:latest"
+APP_IMAGES="privacyidea-docker:3.13 privacyidea-freeradius:latest pi-vpn-pooler:latest pi-custom-captive:latest"
 # Infrastructure images (pulled from registry)
 INFRA_IMAGES="postgres:16-alpine nginx:stable-alpine osixia/openldap:latest"
 # All images for export/import
@@ -58,9 +58,14 @@ build_images() {
         "${SCRIPT_DIR}/pi-vpn-pooler/"
 
     echo ""
+    echo "=== Building pi-custom-captive:latest ==="
+    docker build --no-cache -t pi-custom-captive:latest \
+        "${SCRIPT_DIR}/pi-custom-captive/"
+
+    echo ""
     echo "=== Images built ==="
     docker images --format "  {{.Repository}}:{{.Tag}}  {{.Size}}" \
-        | grep -E "^  (privacyidea-|pi-vpn-|nginx|postgres|osixia)" || true
+        | grep -E "^  (privacyidea-|pi-vpn-|pi-custom-|nginx|postgres|osixia)" || true
 }
 
 export_images() {
@@ -81,7 +86,7 @@ import_images() {
     echo ""
     echo "=== Images loaded ==="
     docker images --format "  {{.Repository}}:{{.Tag}}  {{.Size}}" \
-        | grep -E "^  (privacyidea-|pi-vpn-|nginx|postgres|osixia)" || true
+        | grep -E "^  (privacyidea-|pi-vpn-|pi-custom-|nginx|postgres|osixia)" || true
     echo ""
     echo "Now run:  docker compose --profile=fullstack up -d"
 }
