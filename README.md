@@ -305,6 +305,27 @@ Full example including build with  ```make```targets:
 ```
 make cert build-all stack PI_VERSION=3.13 PI_VERSION_BUILD=3.13 TAG=pidev
 ```
+
+### Dev mode with hot-reload (subprojects)
+
+`docker-compose.dev.yaml` is an override file that bind-mounts the **rlm_python3** and **pi-vpn-pooler** source code into the running containers. This lets you edit Python files locally and see changes applied without rebuilding images.
+
+| Service | What is mounted | Hot-reload |
+|---------|----------------|------------|
+| **vpn_pooler** | `./pi-vpn-pooler` → `/app` | Yes — gunicorn `--reload` restarts workers automatically on file changes |
+| **freeradius** | `./rlm_python3/privacyidea_radius.py` → plugin path | No — FreeRADIUS loads the Python module once at startup. Container restart required: `docker compose restart freeradius` |
+
+Usage:
+
+```
+docker compose --env-file environment/application-dev.env \
+  -f docker-compose.yaml -f docker-compose.dev.yaml \
+  --profile fullstack up --build
+```
+
+> [!Note]
+> The override reduces vpn_pooler to a single gunicorn worker with `--reload` enabled. This is intended for development only — do not use `docker-compose.dev.yaml` in production.
+
 ---
 Now you can deploy additional containers like OpenLDAP for user realms or Owncloud as a client to test 2FA authentication. 
 

@@ -1,0 +1,32 @@
+# Dev overrides — bind-mount subproject source code and enable auto-reload.
+# Allows editing rlm_python3 and pi-vpn-pooler locally without rebuilding images.
+#
+# Usage:
+#   docker compose --env-file environment/application-dev.env \
+#     -f docker-compose.yaml -f docker-compose.dev.yaml \
+#     --profile fullstack up --build
+#
+services:
+  freeradius:
+    volumes:
+      - type: bind
+        source: ./rlm_python3/privacyidea_radius.py
+        target: /usr/share/privacyidea/freeradius/privacyidea_radius.py
+        read_only: true
+
+  vpn_pooler:
+    volumes:
+      - type: bind
+        source: ./pi-vpn-pooler
+        target: /app
+    command:
+      - sh
+      - -c
+      - >-
+        python manage.py migrate --noinput &&
+        python manage.py collectstatic --noinput 2>/dev/null;
+        gunicorn config.wsgi:application
+        --bind 0.0.0.0:8000
+        --workers 1
+        --reload
+        --timeout 120
