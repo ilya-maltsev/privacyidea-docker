@@ -224,6 +224,9 @@ Find example .env files in the *environment* directory.
 | `fullstack` | all services including openldap | **Dev/testing** — includes LDAP with sample data |
 | `ldap` | openldap | LDAP directory only (add to other profiles) |
 
+> [!Note]
+> **Dev-only resolver seed.** `application-dev.env` sets `PI_SEED_RESOLVERS=true`, which tells `entrypoint.py` to run `pi-manage config import -i /privacyidea/etc/persistent/resolver.json` on first boot. The seed is idempotent (gated on a `resolver_imported` flag file) and is **not** enabled in `application-prod.env` — prod stacks start with an empty privacyIDEA configuration.
+
 ### Exposed ports (stack profile)
 
 | Service | Host port | Protocol |
@@ -348,10 +351,15 @@ The VPN Pooler database and user are created automatically on first start via th
 ```DB_API```| postgresql+psycopg2 | Database driver for SQLAlchemy
 
 ### Reverse proxy parameters (for compose/stack)
+
+The nginx `reverse_proxy` terminates TLS for **both** privacyIDEA (host `${PROXY_PORT}` → container `:443`) and VPN Pooler (host `${VPN_POOLER_PORT}` → container `:444`), using the same certificate pair. The `vpn_pooler` container speaks plain HTTP on `:8000` inside the compose network and is not published to the host.
+
 | Variable | Default | Description
 |-----|---------|-------------
-```PROXY_PORT```| 8443 | Exposed HTTPS port
+```PROXY_PORT```| 8443 | Exposed HTTPS port for privacyIDEA.
 ```PROXY_SERVERNAME```| localhost | Set the reverse-proxy server name. Should be the common name used in the certificate.
+```NGINX_TLS_CERT_PATH```| /etc/nginx/ssl/pi.pem | Container-side path to the TLS certificate. Dev default is the self-signed `templates/pi.pem` bind-mounted into the container. In prod, mount your real cert (bind mount, Docker secret, etc.) and point this at the mount target.
+```NGINX_TLS_KEY_PATH```| /etc/nginx/ssl/pi.key | Container-side path to the TLS private key. Same mechanism as `NGINX_TLS_CERT_PATH`.
 
 ### RADIUS parameters (for compose/fullstack)
 | Variable | Default | Description
@@ -390,7 +398,11 @@ The VPN Pooler database and user are created automatically on first start via th
 - Additional user ```helpdesk``` with password ```helpdesk``` and ```admin``` with password ```admin``` available in ldap.
 
 #### Certificates
-Use the provided files/subscriptions from this repository (templates/subs) or rebuild the project with other vendor certificates.
+
+The nginx `reverse_proxy` service serves TLS on two ports (privacyIDEA `:443`, VPN Pooler `:444`) from a single cert/key pair.
+
+- **Dev**: `make cert` generates `templates/pi.pem` + `templates/pi.key`; compose bind-mounts them to `/etc/nginx/ssl/pi.pem` + `/etc/nginx/ssl/pi.key`, and `NGINX_TLS_CERT_PATH` / `NGINX_TLS_KEY_PATH` default to those paths.
+- **Prod**: mount your real certificate and key into the `reverse_proxy` container (additional bind mount, Docker secret, or your orchestrator's equivalent) and set `NGINX_TLS_CERT_PATH` / `NGINX_TLS_KEY_PATH` in `application-prod.env` to the container-side paths. Use PEM without a passphrase; `.pfx` is not supported.
 
 ## Security considerations
 
