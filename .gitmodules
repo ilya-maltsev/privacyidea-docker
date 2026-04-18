@@ -4,3 +4,6 @@
 [submodule "rlm_python3"]
 	path = rlm_python3
 	url = https://github.com/ilya-maltsev/rlm_python3.git
+[submodule "pi-custom-captive"]
+	path = pi-custom-captive
+	url = https://github.com/ilya-maltsev/pi-custom-captive.git
