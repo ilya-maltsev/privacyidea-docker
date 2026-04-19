@@ -497,21 +497,23 @@ The nginx `reverse_proxy` terminates TLS for privacyIDEA (host `${PROXY_PORT}` â
 
 ### Captive Portal parameters (for compose/captive)
 
-The captive portal is stateless (no DB). It requires a privacyIDEA **service account** with admin rights, used to list/create/delete TOTP tokens via the PI REST API. A regular user logs in to the portal with their own AD/LDAP password; once the user has at least one active TOTP token in PI, the portal permanently refuses them until an administrator removes the token. Admin area access requires both a PI admin password **and** an already-enrolled admin TOTP.
+The captive portal is stateless (no DB) and uses **each actor's own PI JWT** â€” there is no service account. A regular user logs in with their AD/LDAP credentials, PI returns a user-scope JWT, and every PI call the portal makes during that session (lockout check, token init) runs on *that* JWT so PI auto-scopes to the caller. Admins authenticate with their own admin password; all admin API calls (list tokens of any user, enable/disable/delete) run on the admin's JWT. Mutations require a further TOTP step-up against the admin's own token (`/validate/check`). Admins who have no TOTP in PI stay read-only for the whole session by design.
 
 | Variable | Default | Description
 |-----|---------|-------------
 ```CAPTIVE_PI_API_URL```| https://reverse_proxy:443 | privacyIDEA API URL the captive portal calls
 ```CAPTIVE_PI_VERIFY_SSL```| false | Verify SSL certificate of the privacyIDEA API
 ```CAPTIVE_PI_REALM```| defrealm | The **only** realm the captive portal operates in (single-realm by design)
-```CAPTIVE_PI_SERVICE_USER```| *(empty)* | privacyIDEA admin username used by the portal to list/init/delete tokens. Required.
-```CAPTIVE_PI_SERVICE_PASSWORD```| *(empty)* | Password for the service account. Required.
 ```CAPTIVE_DJANGO_SECRET_KEY```| changeme | Django secret key. Use `make secrets` inside the submodule to generate one.
 ```CAPTIVE_DJANGO_DEBUG```| false | Enable Django debug mode
 ```CAPTIVE_DJANGO_ALLOWED_HOSTS```| * | Django allowed hosts
 ```CAPTIVE_CSRF_TRUSTED_ORIGINS```| https://localhost:6443 | CSRF trusted origins
 ```CAPTIVE_DJANGO_LOG_LEVEL```| INFO | Django log level
 ```CAPTIVE_PORT```| 6443 | Exposed (external) HTTPS port mapped to the reverse-proxy `:445` listener
+```CAPTIVE_MTLS_ENABLED```| false | Opt-in mTLS header-auth for the **user** flow. When `true`, the portal skips the AD/LDAP password step and trusts identity carried in nginx-set headers after an upstream `ssl_verify_client on` succeeded. Admin flow is unaffected. See [`pi-custom-captive/README.md`](pi-custom-captive/README.md) and `templates/nginx-mtls.*.example.conf` in the submodule for the nginx side (includes a `map` regex to extract a login from a named-OID DN component, plus `ssl_ocsp on`). Never enable this while exposing gunicorn (:8000) directly.
+```CAPTIVE_MTLS_USER_HEADER```| HTTP_X_SSL_USER | Django META key carrying the username (matches header `X-SSL-User`).
+```CAPTIVE_MTLS_VERIFY_HEADER```| HTTP_X_SSL_VERIFY | Django META key carrying nginx's `$ssl_client_verify` status (matches header `X-SSL-Verify`).
+```CAPTIVE_MTLS_REQUIRED_VERIFY_VALUE```| SUCCESS | Value the verify header must equal for the request to be accepted.
 ```CAPTIVE_SYSLOG_ENABLED```| false | Enable remote syslog forwarding. When `false`, logs only go to stdout / container logs.
 ```CAPTIVE_SYSLOG_HOST```| *(empty)* | Remote rsyslog host. Required when `CAPTIVE_SYSLOG_ENABLED=true`.
 ```CAPTIVE_SYSLOG_PORT```| 514 | Remote rsyslog port.
