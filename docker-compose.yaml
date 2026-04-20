@@ -84,10 +84,8 @@ services:
     environment:
       APP_PORT: ${PI_PORT}
       SERVERNAME: ${PROXY_SERVERNAME:-localhost}
-      # Prod: set NGINX_TLS_CERT_PATH / NGINX_TLS_KEY_PATH to wherever you mount real certs.
-      # Dev: defaults point at the self-signed pair bind-mounted below.
-      SSL_CERT: ${NGINX_TLS_CERT_PATH:-/etc/nginx/ssl/pi.pem}
-      SSL_KEY: ${NGINX_TLS_KEY_PATH:-/etc/nginx/ssl/pi.key}
+      SSL_CERT: /etc/nginx/ssl/pi.pem
+      SSL_KEY: /etc/nginx/ssl/pi.key
     ports:
       - "${PROXY_PORT}:443"
       - "${VPN_POOLER_PORT:-5443}:444"
@@ -98,11 +96,11 @@ services:
         target: /etc/nginx/nginx.conf
         read_only: true
       - type: bind
-        source: ./templates/pi.key
+        source: ${NGINX_TLS_KEY_PATH:-./templates/pi.key}
         target: /etc/nginx/ssl/pi.key
         read_only: true
       - type: bind
-        source: ./templates/pi.pem
+        source: ${NGINX_TLS_CERT_PATH:-./templates/pi.pem}
         target: /etc/nginx/ssl/pi.pem
         read_only: true
       - type: bind

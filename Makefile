@@ -12,6 +12,12 @@ PI_ADMIN_PASS := $(shell cat /dev/urandom | tr -dc 'a-zA-Z0-9$!%' | fold -w 16| 
 
 SSL_SUBJECT="/C=DE/ST=SomeState/L=SomeCity/O=privacyIDEA/OU=reverseproxy/CN=localhost"
 
+SERVICE_NAME := privacyidea-docker
+SERVICE_USER := $(shell whoami)
+SERVICE_WORKDIR := $(shell pwd)
+SERVICE_TEMPLATE := templates/privacyidea-docker.service
+SERVICE_FILE := /etc/systemd/system/$(SERVICE_NAME).service
+
 REGISTRY := localhost:5000
 PORT := 8080
 TAG := prod
@@ -88,4 +94,22 @@ make_distclean:
 	@echo Remove container and volumes
 	@${CONTAINER_ENGINE} rm --force ${TAG}-openldap-1 ${TAG}-db-1  ${TAG}-privacyidea-1 ${TAG}-freeradius-1 ${TAG}-reverse_proxy-1 ${TAG}-vpn_pooler-1
 	@${CONTAINER_ENGINE} volume rm prod_pgdata prod_pidata prod_vpn_pooler_static
+
+install-service:
+	@echo "Installing systemd service: $(SERVICE_NAME)"
+	@sed -e 's|__USER__|$(SERVICE_USER)|g' -e 's|__WORKDIR__|$(SERVICE_WORKDIR)|g' $(SERVICE_TEMPLATE) | sudo tee $(SERVICE_FILE) > /dev/null
+	@sudo systemctl daemon-reload
+	@sudo systemctl enable $(SERVICE_NAME).service
+	@echo "Service installed and enabled."
+	@echo "  Start:   sudo systemctl start $(SERVICE_NAME)"
+	@echo "  Stop:    sudo systemctl stop $(SERVICE_NAME)"
+	@echo "  Status:  sudo systemctl status $(SERVICE_NAME)"
+
+uninstall-service:
+	@echo "Removing systemd service: $(SERVICE_NAME)"
+	@sudo systemctl stop $(SERVICE_NAME).service 2>/dev/null || true
+	@sudo systemctl disable $(SERVICE_NAME).service 2>/dev/null || true
+	@sudo rm -f $(SERVICE_FILE)
+	@sudo systemctl daemon-reload
+	@echo "Service removed."
 

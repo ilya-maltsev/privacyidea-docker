@@ -1,0 +1,17 @@
+[Unit]
+Description=privacyIDEA Docker Compose Stack
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+User=__USER__
+WorkingDirectory=__WORKDIR__
+TimeoutStartSec=0
+RemainAfterExit=yes
+
+ExecStart=/usr/bin/docker compose --env-file=environment/application-prod.env -p prod --profile=stack up -d
+ExecStop=/usr/bin/docker compose --env-file=environment/application-prod.env -p prod --profile=stack stop
+
+[Install]
+WantedBy=multi-user.target

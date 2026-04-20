@@ -36,7 +36,7 @@ Username / password: admin / admin
 | *conf* | contains *pi.cfg* and *logging.cfg* files which is included in the image build process.|
 | *environment* | contains different example-environment files for a whole stack via docker compose|
 | *scripts* | contains custom scripts for the privacyIDEA script-handler. The directory will be mounted into the container when composing a [stack](#compose-a-privacyidea-stack). Scripts must be executable (chmod +x)|
-| *templates*| contains files used for different services (nginx, radius ...) and also contains the ssl certificate for the reverse-proxy. Replace it with your own certificate and key file. Use PEM-Format without a passphrase. \*.pfx is not supported. Name must be ***pi.pem*** and ***pi.key***. |
+| *templates*| contains files used for different services (nginx, radius ...), the self-signed dev SSL certificate (`pi.pem` / `pi.key`), and the systemd service template. For production TLS, set `NGINX_TLS_CERT_PATH` / `NGINX_TLS_KEY_PATH` in your env file to point at your real cert/key (PEM without passphrase; `.pfx` not supported). |
 | *templates/rsyslog*| Dockerfile and config for the rsyslog log-collector container (fullstack profile only).|
 | *rlm_python3*| git submodule — [FreeRADIUS rlm_python3 plugin](https://github.com/ilya-maltsev/rlm_python3) for privacyIDEA authentication. Replaces the legacy Perl-based rlm_perl plugin.|
 | *pi-vpn-pooler*| git submodule — [VPN IP pool manager](https://github.com/ilya-maltsev/pi-vpn-pooler) that integrates with privacyIDEA API.|
@@ -165,6 +165,8 @@ make distclean
 | ```stack``` |```TAG``` ```PROFILE```| Run a production stack (db, privacyidea, reverse_proxy, freeradius, vpn_pooler, captive). Default profile is *stack*. | ```make stack```, ```make stack TAG=dev PROFILE=fullstack```|
 | ```fullstack``` || Run a full dev/test stack (all stack services + LDAP + rsyslog) | ```make fullstack```
 | ```resolver``` || Create resolvers and realm for fullstack | ```make resolver```
+| ```install-service``` |```SERVICE_USER``` ```SERVICE_WORKDIR```| Install and enable a systemd service that starts/stops the stack on boot. Defaults to current user and current directory. | ```make install-service```, ```make install-service SERVICE_USER=security SERVICE_WORKDIR=/opt/privacyidea-docker```|
+| ```uninstall-service``` || Stop, disable and remove the systemd service | ```make uninstall-service```|
 | ```clean``` |```TAG```| Remove the container and network without removing the named volumes. Optional: change prefix tag of the container name. Defaults to *prod* | ```make clean TAG=prod```|
 | ```distclean``` |```TAG```| Remove the container, network **and named volumes**. Optional: change prefix tag of the container name. Defaults to *prod* | ```make distclean TAG=prod```|
 
@@ -270,23 +272,31 @@ Find example .env files in the *environment* directory.
 ---
 ### Examples:
 
-Build all images and run a full stack:
+Build all images and run a full dev stack (self-signed cert):
 
 ```
 make cert build-all fullstack
 ```
 
+Run a production stack with your own TLS certificates (set paths in `application-prod.env`):
+
+```
+make build-all stack
+```
+
+> [!Note]
+> In production, `make cert` is **not needed** — set `NGINX_TLS_CERT_PATH` and `NGINX_TLS_KEY_PATH` in your environment file to point at your existing certificate and key. Only use `make cert` for dev/testing with a self-signed pair.
+
 Run a stack with project the name *prod* and environment variables files from *environment/application-prod.env*
 
 ```
-  $ make cert  #run only once to generate certificate
   $ docker compose --env-file=environment/application-prod.env -p prod --profile=stack up -d
 ```
 Or simple run a ```make``` target.
 
 This example will start a production stack including **PostgreSQL**, **privacyIDEA**, **reverse_proxy**, **FreeRADIUS**, **VPN Pooler** and **Captive Portal**:
 ```
-make cert stack
+make stack
 ```
 
 This example will start a full stack (dev) including all production services **plus OpenLDAP** with sample data, users and realms, and a centralized **rsyslog** collector. Project tag is *prod*:
@@ -453,8 +463,8 @@ The nginx `reverse_proxy` terminates TLS for privacyIDEA (host `${PROXY_PORT}` �
 |-----|---------|-------------
 ```PROXY_PORT```| 8443 | Exposed HTTPS port for privacyIDEA.
 ```PROXY_SERVERNAME```| localhost | Set the reverse-proxy server name. Should be the common name used in the certificate.
-```NGINX_TLS_CERT_PATH```| /etc/nginx/ssl/pi.pem | Container-side path to the TLS certificate. Dev default is the self-signed `templates/pi.pem` bind-mounted into the container. In prod, mount your real cert (bind mount, Docker secret, etc.) and point this at the mount target.
-```NGINX_TLS_KEY_PATH```| /etc/nginx/ssl/pi.key | Container-side path to the TLS private key. Same mechanism as `NGINX_TLS_CERT_PATH`.
+```NGINX_TLS_CERT_PATH```| ./templates/pi.pem | **Host-side** path to the TLS certificate file. This path is bind-mounted into the container. Leave empty to use the dev self-signed cert at `./templates/pi.pem`. In prod, set to the absolute path of your real certificate (e.g. `/etc/ssl/private/privacyidea.pem`).
+```NGINX_TLS_KEY_PATH```| ./templates/pi.key | **Host-side** path to the TLS private key file. Same mechanism as `NGINX_TLS_CERT_PATH`. In prod, set to the absolute path of your real key (e.g. `/etc/ssl/private/privacyidea.key`).
 
 ### RADIUS parameters (for compose/fullstack)
 | Variable | Default | Description
@@ -537,8 +547,55 @@ The captive portal is stateless (no DB) and uses **each actor's own PI JWT** —
 
 The nginx `reverse_proxy` service serves TLS on three ports (privacyIDEA `:443`, VPN Pooler `:444`, Captive Portal `:445`) from a single cert/key pair.
 
-- **Dev**: `make cert` generates `templates/pi.pem` + `templates/pi.key`; compose bind-mounts them to `/etc/nginx/ssl/pi.pem` + `/etc/nginx/ssl/pi.key`, and `NGINX_TLS_CERT_PATH` / `NGINX_TLS_KEY_PATH` default to those paths.
-- **Prod**: mount your real certificate and key into the `reverse_proxy` container (additional bind mount, Docker secret, or your orchestrator's equivalent) and set `NGINX_TLS_CERT_PATH` / `NGINX_TLS_KEY_PATH` in `application-prod.env` to the container-side paths. Use PEM without a passphrase; `.pfx` is not supported.
+- **Dev**: `make cert` generates `templates/pi.pem` + `templates/pi.key`. When `NGINX_TLS_CERT_PATH` / `NGINX_TLS_KEY_PATH` are empty or unset, compose bind-mounts these self-signed files into the container automatically.
+- **Prod**: set `NGINX_TLS_CERT_PATH` and `NGINX_TLS_KEY_PATH` in `application-prod.env` to the **host-side** absolute paths of your real certificate and key. Compose will bind-mount them into the container. No `make cert` needed. Use PEM format without a passphrase; `.pfx` is not supported.
+
+Example (`application-prod.env`):
+```
+NGINX_TLS_CERT_PATH=/etc/ssl/private/privacyidea.pem
+NGINX_TLS_KEY_PATH=/etc/ssl/private/privacyidea.key
+```
+
+## Production deployment with systemd
+
+For production servers, you can install a systemd service that starts the stack on boot and stops it on shutdown.
+
+### Install the service
+
+```
+make install-service
+```
+
+This installs `/etc/systemd/system/privacyidea-docker.service`, enables it for automatic start on boot, and uses the current user and working directory.
+
+Override the user or working directory:
+
+```
+make install-service SERVICE_USER=security SERVICE_WORKDIR=/opt/privacyidea-docker
+```
+
+### Manage the service
+
+```bash
+sudo systemctl start privacyidea-docker    # Start the stack
+sudo systemctl stop privacyidea-docker     # Stop the stack
+sudo systemctl status privacyidea-docker   # Check status
+sudo journalctl -u privacyidea-docker      # View logs
+```
+
+### Remove the service
+
+```
+make uninstall-service
+```
+
+### Production checklist
+
+1. Set `NGINX_TLS_CERT_PATH` and `NGINX_TLS_KEY_PATH` in `environment/application-prod.env` to your real certificate and key paths. Do **not** use `make cert` in production.
+2. Replace all default secrets (`PI_PEPPER`, `PI_SECRET`, `DB_PASSWORD`, etc.) — use `make secrets` to generate new ones.
+3. Run `make build-all` to build images.
+4. Run `make install-service` to enable the systemd service.
+5. Start with `sudo systemctl start privacyidea-docker`.
 
 ## Syslog and DEBUG logging
 
@@ -700,6 +757,12 @@ docker exec -it prod-db-1 pg_dump -U vpn_pooler vpn_pooler
 ## Changelog
 
 ### Recent changes
+
+**Systemd service and TLS cert configuration**
+- Added `make install-service` / `make uninstall-service` targets to deploy a systemd unit that starts/stops the stack on boot (configurable user and working directory)
+- Added `templates/privacyidea-docker.service` systemd unit template
+- Changed `NGINX_TLS_CERT_PATH` / `NGINX_TLS_KEY_PATH` to control the **host-side bind mount source** — in production, set these to your real cert/key paths without needing `make cert`
+- Dev environment unchanged: empty/unset values fall back to the self-signed `./templates/pi.pem` + `pi.key`
 
 **Dev environment refactoring** (`dev_env_refact`)
 - Added `docker-compose.dev.yaml` override for subproject hot-reload: bind-mounts `pi-vpn-pooler` source into vpn_pooler container with gunicorn `--reload`, bind-mounts `privacyidea_radius.py` into freeradius container
