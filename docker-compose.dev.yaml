@@ -19,11 +19,13 @@ services:
       - type: bind
         source: ./pi-vpn-pooler
         target: /app
+      - type: bind
+        source: ./pi-vpn-pooler/data
+        target: /app/data
     command:
       - sh
       - -c
       - >-
-        python manage.py migrate --noinput &&
         python manage.py collectstatic --noinput 2>/dev/null;
         gunicorn config.wsgi:application
         --bind 0.0.0.0:8000

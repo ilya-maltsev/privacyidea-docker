@@ -5,17 +5,10 @@ services:
       POSTGRES_DB: ${DB_NAME:-pi}
       POSTGRES_USER: ${DB_USER:-pi}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-superSecret}
-      VPN_POOLER_DB_NAME: ${VPN_POOLER_DB_NAME:-vpn_pooler}
-      VPN_POOLER_DB_USER: ${VPN_POOLER_DB_USER:-vpn_pooler}
-      VPN_POOLER_DB_PASSWORD: ${VPN_POOLER_DB_PASSWORD:-changeme}
     ports:
       - "${DB_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data:rw,Z
-      - type: bind
-        source: ./templates/init-vpn-pooler-db.sh
-        target: /docker-entrypoint-initdb.d/init-vpn-pooler-db.sh
-        read_only: true
     networks:
       - privacyidea
     restart: always
@@ -160,15 +153,7 @@ services:
     build:
       context: ./pi-vpn-pooler
     image: pi-vpn-pooler:latest
-    depends_on:
-      db:
-        condition: service_healthy
     environment:
-      DB_NAME: ${VPN_POOLER_DB_NAME:-vpn_pooler}
-      DB_USER: ${VPN_POOLER_DB_USER:-vpn_pooler}
-      DB_PASSWORD: ${VPN_POOLER_DB_PASSWORD:-changeme}
-      DB_HOST: db
-      DB_PORT: 5432
       PI_API_URL: ${VPN_POOLER_PI_API_URL:-https://reverse_proxy:443}
       PI_VERIFY_SSL: ${VPN_POOLER_PI_VERIFY_SSL:-false}
       DJANGO_SECRET_KEY: ${VPN_POOLER_DJANGO_SECRET_KEY:-changeme}
@@ -176,6 +161,7 @@ services:
       DJANGO_ALLOWED_HOSTS: ${VPN_POOLER_DJANGO_ALLOWED_HOSTS:-*}
       CSRF_TRUSTED_ORIGINS: ${VPN_POOLER_CSRF_TRUSTED_ORIGINS:-https://localhost:5443}
       DJANGO_LOG_LEVEL: ${VPN_POOLER_DJANGO_LOG_LEVEL:-INFO}
+      POOLS_FILE: /app/data/pools.yaml
       SYSLOG_ENABLED: ${VPN_POOLER_SYSLOG_ENABLED:-false}
       SYSLOG_HOST: ${VPN_POOLER_SYSLOG_HOST:-}
       SYSLOG_PORT: ${VPN_POOLER_SYSLOG_PORT:-514}
@@ -185,6 +171,7 @@ services:
       SYSLOG_LEVEL: ${VPN_POOLER_SYSLOG_LEVEL:-INFO}
     volumes:
       - vpn_pooler_static:/app/staticfiles
+      - vpn_pooler_data:/app/data
     expose:
       - "8000"
     networks:
@@ -280,6 +267,7 @@ volumes:
   pgdata: {}
   pidata: {}
   vpn_pooler_static: {}
+  vpn_pooler_data: {}
   captive_static: {}
   rsyslog_logs: {}
  
