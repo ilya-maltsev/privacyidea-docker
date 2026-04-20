@@ -128,7 +128,7 @@ make build PI_VERSION=3.13 PI_VERSION_BUILD=3.13
 
 | Image | Used by |
 |-------|---------|
-| `postgres:16-alpine` | Shared database for privacyIDEA and VPN Pooler |
+| `postgres:16-alpine` | Database for privacyIDEA |
 | `nginx:stable-alpine` | Reverse proxy |
 | `osixia/openldap:latest` | LDAP directory (optional, for testing) |
 
@@ -210,7 +210,6 @@ graph TD;
   w3<-- for clients -->n2<-- resolver -->n3
   w7<-- VPN pool mgmt -->n1<-- ":444 → :8000" -->vpn1<-- "PI API via NGINX" -->n1
   w8<-- TOTP self-enrol -->n1<-- ":445 → :8000" -->cap1<-- "PI API via NGINX" -->n1
-  vpn1<-->n4
   n3-. "syslog udp/514" .->syslog1
   r1-. "syslog udp/514" .->syslog1
   vpn1-. "syslog udp/514" .->syslog1
@@ -399,19 +398,14 @@ Have fun!
 
 ## Database
 
-This project uses **PostgreSQL 16** as the database backend.
-
-A single PostgreSQL instance is shared between privacyIDEA and VPN Pooler. Each application uses its own database:
+This project uses **PostgreSQL 16** as the database backend for privacyIDEA.
 
 | Database | User | Used by |
 |----------|------|---------|
 | `pi` | `pi` | privacyIDEA |
-| `vpn_pooler` | `vpn_pooler` | VPN Pooler |
-
-The VPN Pooler database and user are created automatically on first start via the init script `templates/init-vpn-pooler-db.sh`.
 
 > [!Note]
-> The Captive Portal is **stateless** — it has no local database. All user/token state lives in privacyIDEA, and the portal emits every action as syslog events (see [Syslog and DEBUG logging](#syslog-and-debug-logging)).
+> The **VPN Pooler** and **Captive Portal** are both **stateless** — they have no local database. VPN Pooler stores pool definitions in a YAML file (`/app/data/pools.yaml`) on a Docker volume and reads allocations live from privacyIDEA user attributes on every request. The Captive Portal is fully stateless. Both emit actions as syslog events (see [Syslog and DEBUG logging](#syslog-and-debug-logging)).
 
 > [!Note]
 > privacyIDEA uses `psycopg2` as the PostgreSQL adapter. Since privacyIDEA 3.3, the PostgreSQL adapter is not included in the default installation (see [privacyIDEA FAQ](https://privacyidea.readthedocs.io/en/stable/faq/mysqldb.html)). This project installs `psycopg2-binary` explicitly in the Dockerfile.
@@ -485,11 +479,11 @@ The nginx `reverse_proxy` terminates TLS for privacyIDEA (host `${PROXY_PORT}` �
 ```RADIUS_SYSLOG_LEVEL```| INFO | Minimum level forwarded to syslog: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. Must be `DEBUG` to see full-packet dumps from `RADIUS_DEBUG=true`.
 
 ### VPN Pooler parameters (for compose/vpn_pooler)
+
+The VPN Pooler is **stateless** — no database. Pool definitions are stored in a YAML file on a Docker volume (`/app/data/pools.yaml`). Allocations are read live from privacyIDEA user attributes on every request. Login supports optional 2FA: users with an active TOTP token in privacyIDEA are prompted for a one-time code after password authentication; users without TOTP skip the OTP step.
+
 | Variable | Default | Description
 |-----|---------|-------------
-```VPN_POOLER_DB_NAME```| vpn_pooler | VPN Pooler database name
-```VPN_POOLER_DB_USER```| vpn_pooler | VPN Pooler database user
-```VPN_POOLER_DB_PASSWORD```| changeme | VPN Pooler database password
 ```VPN_POOLER_PI_API_URL```| https://reverse_proxy:443 | privacyIDEA API URL
 ```VPN_POOLER_PI_VERIFY_SSL```| false | Verify SSL certificate of privacyIDEA API
 ```VPN_POOLER_DJANGO_SECRET_KEY```| changeme | Django secret key
@@ -748,10 +742,10 @@ For the example stack, use the db container:
 docker exec -it prod-db-1 pg_dump -U pi pi
 ```
 
-To dump the VPN Pooler database:
+To back up VPN Pooler pool definitions, copy the YAML file from the `vpn_pooler_data` volume:
 
 ```
-docker exec -it prod-db-1 pg_dump -U vpn_pooler vpn_pooler
+docker cp prod-vpn_pooler-1:/app/data/pools.yaml ./pools-backup.yaml
 ```
 
 ## Changelog
