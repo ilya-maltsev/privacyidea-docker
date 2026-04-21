@@ -5,15 +5,15 @@ IMAGE_NAME := privacyidea-docker:${PI_VERSION}
 BUILDER := docker build
 CONTAINER_ENGINE := docker
 
-PI_PEPPER := $(shell cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)
-PI_SECRET := $(shell cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)
-DB_PASSWORD := $(shell cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)
-PI_ADMIN_PASS := $(shell cat /dev/urandom | tr -dc 'a-zA-Z0-9$!%' | fold -w 16| head -n1)
+RANDOM_32 = cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1
+RANDOM_16 = cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 16 | head -n 1
+RANDOM_50 = cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 50 | head -n 1
+RANDOM_ENCKEY = head -c 96 /dev/urandom | base64 -w0
 
 SSL_SUBJECT="/C=DE/ST=SomeState/L=SomeCity/O=privacyIDEA/OU=reverseproxy/CN=localhost"
 
 SERVICE_NAME := privacyidea-docker
-SERVICE_USER := $(shell whoami)
+SERVICE_USER := privacyidea
 SERVICE_WORKDIR := $(shell pwd)
 SERVICE_TEMPLATE := templates/privacyidea-docker.service
 SERVICE_FILE := /etc/systemd/system/$(SERVICE_NAME).service
@@ -38,14 +38,27 @@ cert:
 	@echo Certificate generation done...
 
 secrets:
-	@echo Generate new secrets for environment file
-	@echo -----------------------------------------
-	@echo PI_SECRET=$(PI_SECRET)
-	@echo PI_PEPPER=$(PI_PEPPER)
-	@echo PI_ADMIN_PASS=$(PI_ADMIN_PASS)
-	@echo DB_PASSWORD=$(DB_PASSWORD)
-	@echo -----------------------------------------
-	@echo Please replace within your environment file
+	$(eval ENV_FILE := environment/application-$(TAG).env)
+	@test -f $(ENV_FILE) || { echo "ERROR: $(ENV_FILE) not found"; exit 1; }
+	@echo "Generating secrets for $(ENV_FILE) ..."
+	@# --- core secrets ---
+	@NEW=$$($(RANDOM_32)); sed -i "s|^PI_SECRET=.*|PI_SECRET=$$NEW|" $(ENV_FILE); echo "  PI_SECRET=$$NEW"
+	@NEW=$$($(RANDOM_32)); sed -i "s|^PI_PEPPER=.*|PI_PEPPER=$$NEW|" $(ENV_FILE); echo "  PI_PEPPER=$$NEW"
+	@NEW=$$($(RANDOM_16)); sed -i "s|^PI_ADMIN_PASS=.*|PI_ADMIN_PASS=$$NEW|" $(ENV_FILE); echo "  PI_ADMIN_PASS=$$NEW"
+	@NEW=$$($(RANDOM_32)); sed -i "s|^DB_PASSWORD=.*|DB_PASSWORD=$$NEW|" $(ENV_FILE); echo "  DB_PASSWORD=$$NEW"
+	@# --- PI_ENCKEY (96 random bytes, base64) ---
+	@NEW=$$($(RANDOM_ENCKEY)); \
+		if grep -q '^#PI_ENCKEY=' $(ENV_FILE); then \
+			sed -i "s|^#PI_ENCKEY=.*|PI_ENCKEY=$$NEW|" $(ENV_FILE); \
+		elif grep -q '^PI_ENCKEY=' $(ENV_FILE); then \
+			sed -i "s|^PI_ENCKEY=.*|PI_ENCKEY=$$NEW|" $(ENV_FILE); \
+		else \
+			sed -i '/^PI_SECRET=/a PI_ENCKEY='"$$NEW" $(ENV_FILE); \
+		fi; echo "  PI_ENCKEY=$$NEW"
+	@# --- Django secret keys ---
+	@NEW=$$($(RANDOM_50)); sed -i "s|^VPN_POOLER_DJANGO_SECRET_KEY=.*|VPN_POOLER_DJANGO_SECRET_KEY=$$NEW|" $(ENV_FILE); echo "  VPN_POOLER_DJANGO_SECRET_KEY=$$NEW"
+	@NEW=$$($(RANDOM_50)); sed -i "s|^CAPTIVE_DJANGO_SECRET_KEY=.*|CAPTIVE_DJANGO_SECRET_KEY=$$NEW|" $(ENV_FILE); echo "  CAPTIVE_DJANGO_SECRET_KEY=$$NEW"
+	@echo "Done. All secrets written to $(ENV_FILE)"
 	
 stack:
 	@PI_BOOTSTRAP="true" \
@@ -55,7 +68,7 @@ stack:
 	
 fullstack:
 	@PI_BOOTSTRAP="true" \
-	${CONTAINER_ENGINE} compose --env-file=environment/application-${TAG}.env -p ${TAG} --profile=fullstack up -d
+	${CONTAINER_ENGINE} compose -f docker-compose.yaml -f docker-compose.dev.yaml --env-file=environment/application-${TAG}.env -p ${TAG} --profile=fullstack up -d
 	@echo 
 	@echo Access to privacyIDEA Web-UI: https://localhost:8443
 	@echo to create resolvers and realm, please run: make resolver
@@ -91,19 +104,13 @@ distclean:
 	@echo -n "Warning! This will remove all related volumes: Are you sure? [y/N] " && read ans && if [ $${ans:-'N'} = 'y' ]; then make make_distclean; fi
 
 make_distclean:
-	@echo Remove container and volumes
+	@echo Remove containers, volumes and data directories
 	@${CONTAINER_ENGINE} rm --force ${TAG}-openldap-1 ${TAG}-db-1  ${TAG}-privacyidea-1 ${TAG}-freeradius-1 ${TAG}-reverse_proxy-1 ${TAG}-vpn_pooler-1
-	@${CONTAINER_ENGINE} volume rm prod_pgdata prod_pidata prod_vpn_pooler_static
+	@${CONTAINER_ENGINE} volume rm ${TAG}_pgdata ${TAG}_pidata ${TAG}_vpn_pooler_static ${TAG}_vpn_pooler_data ${TAG}_captive_static ${TAG}_rsyslog_logs 2>/dev/null || true
+	@rm -rf data/
 
 install-service:
-	@echo "Installing systemd service: $(SERVICE_NAME)"
-	@sed -e 's|__USER__|$(SERVICE_USER)|g' -e 's|__WORKDIR__|$(SERVICE_WORKDIR)|g' $(SERVICE_TEMPLATE) | sudo tee $(SERVICE_FILE) > /dev/null
-	@sudo systemctl daemon-reload
-	@sudo systemctl enable $(SERVICE_NAME).service
-	@echo "Service installed and enabled."
-	@echo "  Start:   sudo systemctl start $(SERVICE_NAME)"
-	@echo "  Stop:    sudo systemctl stop $(SERVICE_NAME)"
-	@echo "  Status:  sudo systemctl status $(SERVICE_NAME)"
+	@sudo bash setup-service.sh $(SERVICE_USER) $(SERVICE_WORKDIR)
 
 uninstall-service:
 	@echo "Removing systemd service: $(SERVICE_NAME)"

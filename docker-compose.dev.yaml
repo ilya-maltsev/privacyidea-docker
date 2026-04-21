@@ -1,12 +1,31 @@
-# Dev overrides — bind-mount subproject source code and enable auto-reload.
-# Allows editing rlm_python3, pi-vpn-pooler and pi-custom-captive locally without rebuilding images.
+# Dev overrides — use Docker named volumes instead of host directories,
+# bind-mount subproject source code, and enable auto-reload.
 #
 # Usage:
 #   docker compose --env-file environment/application-dev.env \
 #     -f docker-compose.yaml -f docker-compose.dev.yaml \
 #     --profile fullstack up --build
 #
+# Or via Makefile:
+#   make fullstack
+#
+volumes:
+  pgdata: {}
+  pidata: {}
+  vpn_pooler_static: {}
+  vpn_pooler_data: {}
+  captive_static: {}
+  rsyslog_logs: {}
+
 services:
+  db:
+    volumes:
+      - pgdata:/var/lib/postgresql/data:rw,Z
+
+  privacyidea:
+    volumes:
+      - pidata:/privacyidea/etc/persistent:rw,Z
+
   freeradius:
     volumes:
       - type: bind
@@ -48,3 +67,7 @@ services:
         --workers 1
         --reload
         --timeout 120
+
+  rsyslog:
+    volumes:
+      - rsyslog_logs:/var/log/remote

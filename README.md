@@ -101,12 +101,12 @@ The script automatically initializes git submodules before building.
 
 ### Build, export and import
 
-For offline environments or transferring images between machines:
+For offline environments or transferring images between machines. The archive includes the full repository (Makefile, compose files, environment templates, configs) and all Docker images in a single `.tar.gz`:
 
 ```
 bash build-images.sh all       # build + export to privacyidea-images.tar.gz
 bash build-images.sh export    # export only (images must exist)
-bash build-images.sh import    # import from privacyidea-images.tar.gz
+bash build-images.sh import    # import from docker-images.tar (extract archive first)
 ```
 
 ### Build a specific privacyIDEA version
@@ -146,11 +146,11 @@ make push REGISTRY=localhost:5000
 make clean
 ```
 You can start the container with the same database (sqlite) and configuration and use ```make run``` again without bootstrapping the instance.
-#### Remove the container including volumes:
+#### Remove the container including data:
 ```
 make distclean
 ```
-&#9432; This will wipe the whole container including the volumes!
+&#9432; This will remove all containers **and** the `data/` directories (database, persistent config, etc.)!
 
 ## Overview ```make``` targets
 
@@ -165,10 +165,10 @@ make distclean
 | ```stack``` |```TAG``` ```PROFILE```| Run a production stack (db, privacyidea, reverse_proxy, freeradius, vpn_pooler, captive). Default profile is *stack*. | ```make stack```, ```make stack TAG=dev PROFILE=fullstack```|
 | ```fullstack``` || Run a full dev/test stack (all stack services + LDAP + rsyslog) | ```make fullstack```
 | ```resolver``` || Create resolvers and realm for fullstack | ```make resolver```
-| ```install-service``` |```SERVICE_USER``` ```SERVICE_WORKDIR```| Install and enable a systemd service that starts/stops the stack on boot. Defaults to current user and current directory. | ```make install-service```, ```make install-service SERVICE_USER=security SERVICE_WORKDIR=/opt/privacyidea-docker```|
+| ```install-service``` |```SERVICE_USER``` ```SERVICE_WORKDIR```| Create service user (if needed), add to docker group, set directory ownership, install and enable systemd service. Defaults to user `privacyidea` and current directory. | ```make install-service```, ```make install-service SERVICE_USER=privacyidea SERVICE_WORKDIR=/opt/privacyidea-docker```|
 | ```uninstall-service``` || Stop, disable and remove the systemd service | ```make uninstall-service```|
 | ```clean``` |```TAG```| Remove the container and network without removing the named volumes. Optional: change prefix tag of the container name. Defaults to *prod* | ```make clean TAG=prod```|
-| ```distclean``` |```TAG```| Remove the container, network **and named volumes**. Optional: change prefix tag of the container name. Defaults to *prod* | ```make distclean TAG=prod```|
+| ```distclean``` |```TAG```| Remove containers, networks, **named volumes** (dev) **and data directories** (prod). Defaults to *prod* | ```make distclean TAG=prod```|
 
 > [!Important] 
 > Using the image as a standalone container is not production ready. For a more like 'production ready' instance, please read the next section.
@@ -391,8 +391,8 @@ Now you can deploy additional containers like OpenLDAP for user realms or Ownclo
 Have fun!
 
 > [!IMPORTANT] 
->- Volumes will not be deleted. 
->- Delete the files in */privacyidea/etc/persistent/ **inside* the privacyIDEA container if you want to bootstrap again. This will not delete an existing database except sqlite databases!
+>- **Dev** uses Docker named volumes (managed by Docker). **Prod** uses host directories under `data/` (set via `*_PATH` variables in `application-prod.env`). Neither is deleted by `make clean` or `docker compose down` — use `make distclean` to remove both.
+>- Delete the files in `data/pidata/` (prod) or the `pidata` volume (dev) if you want to bootstrap again. This will not delete an existing database except sqlite databases!
 >- Compose a stack takes some time until the database tables are deployed and privacyIDEA is ready to run. Check health status of the container.
 
 
@@ -405,13 +405,31 @@ This project uses **PostgreSQL 16** as the database backend for privacyIDEA.
 | `pi` | `pi` | privacyIDEA |
 
 > [!Note]
-> The **VPN Pooler** and **Captive Portal** are both **stateless** — they have no local database. VPN Pooler stores pool definitions in a YAML file (`/app/data/pools.yaml`) on a Docker volume and reads allocations live from privacyIDEA user attributes on every request. The Captive Portal is fully stateless. Both emit actions as syslog events (see [Syslog and DEBUG logging](#syslog-and-debug-logging)).
+> The **VPN Pooler** and **Captive Portal** are both **stateless** — they have no local database. VPN Pooler stores pool definitions in a YAML file (`/app/data/pools.yaml`) mounted from `data/vpn_pooler_data/` and reads allocations live from privacyIDEA user attributes on every request. The Captive Portal is fully stateless. Both emit actions as syslog events (see [Syslog and DEBUG logging](#syslog-and-debug-logging)).
 
 > [!Note]
 > privacyIDEA uses `psycopg2` as the PostgreSQL adapter. Since privacyIDEA 3.3, the PostgreSQL adapter is not included in the default installation (see [privacyIDEA FAQ](https://privacyidea.readthedocs.io/en/stable/faq/mysqldb.html)). This project installs `psycopg2-binary` explicitly in the Dockerfile.
 
 
 ## Environment Variables
+
+### Data storage
+
+**Prod** (`docker-compose.yaml`): persistent data is stored in host directories under `./data/` — visible, easy to back up, owned by the service user.
+
+**Dev** (`docker-compose.dev.yaml` override): persistent data uses Docker named volumes — no setup needed.
+
+| Directory / Volume | Contents |
+|--------------------|----------|
+| `data/pgdata` / `pgdata` | PostgreSQL database files |
+| `data/pidata` / `pidata` | privacyIDEA persistent config (enckey, etc.) |
+| `data/vpn_pooler_static` / `vpn_pooler_static` | VPN Pooler collected static files |
+| `data/vpn_pooler_data` / `vpn_pooler_data` | VPN Pooler pool definitions (`pools.yaml`) |
+| `data/captive_static` / `captive_static` | Captive Portal collected static files |
+| `data/rsyslog_logs` / `rsyslog_logs` | rsyslog log files (fullstack only) |
+
+> [!Note]
+> `docker-compose.yaml` uses `./data/*` bind mounts and has no `volumes:` section. The dev override (`docker-compose.dev.yaml`) declares named volumes and overrides the mounts. `make fullstack` loads the override automatically; `make stack` uses the base file only.
 
 ### privacyIDEA
 | Variable | Default | Description
@@ -556,17 +574,24 @@ For production servers, you can install a systemd service that starts the stack 
 
 ### Install the service
 
+`setup-service.sh` handles everything needed to run the stack as a non-root systemd service:
+
+1. Creates the service user as a system account (if it does not exist)
+2. Adds the user to the `docker` group (required to run `docker compose`)
+3. Sets ownership of the working directory to the service user
+4. Installs and enables the systemd unit
+
 ```
-make install-service
+make install-service SERVICE_USER=privacyidea SERVICE_WORKDIR=/opt/privacyidea-docker
 ```
 
-This installs `/etc/systemd/system/privacyidea-docker.service`, enables it for automatic start on boot, and uses the current user and working directory.
-
-Override the user or working directory:
+Or call the script directly:
 
 ```
-make install-service SERVICE_USER=security SERVICE_WORKDIR=/opt/privacyidea-docker
+sudo bash setup-service.sh privacyidea /opt/privacyidea-docker
 ```
+
+Defaults: user `privacyidea`, working directory is the script's location.
 
 ### Manage the service
 
@@ -587,9 +612,110 @@ make uninstall-service
 
 1. Set `NGINX_TLS_CERT_PATH` and `NGINX_TLS_KEY_PATH` in `environment/application-prod.env` to your real certificate and key paths. Do **not** use `make cert` in production.
 2. Replace all default secrets (`PI_PEPPER`, `PI_SECRET`, `DB_PASSWORD`, etc.) — use `make secrets` to generate new ones.
-3. Run `make build-all` to build images.
-4. Run `make install-service` to enable the systemd service.
+3. Run `make build-all` to build images (or use `build-images.sh all` for [remote deployment](#remote--offline-deployment-with-archived-images)).
+4. Run `make install-service SERVICE_USER=privacyidea` to create the service user and enable the systemd service.
 5. Start with `sudo systemctl start privacyidea-docker`.
+
+## Remote / offline deployment with archived images
+
+For environments where the target server has no internet access or where you want to avoid building images on production hosts, you can build and archive all Docker images on a build machine, transfer the archive, and import it on the target.
+
+### Overview
+
+```
+┌─────────────────────────────┐            ┌──────────────────────────────────┐
+│  BUILD HOST (has internet)  │            │  REMOTE HOST (offline / prod)    │
+│                             │            │                                  │
+│  1. git clone + submodules  │  single    │  3. extract archive              │
+│  2. build-images.sh all     │  ──────►   │  4. build-images.sh import       │
+│     → privacyidea-          │  scp/usb   │  5. configure environment        │
+│       images.tar.gz         │            │  6. make stack                   │
+│     (repo + Docker images)  │            │  7. make install-service         │
+└─────────────────────────────┘            └──────────────────────────────────┘
+```
+
+The archive (`privacyidea-images.tar.gz`) is **self-contained** — it bundles the runtime files (Makefile, `docker-compose.yaml`, `build-images.sh`, `environment/`, `templates/`, `conf/`, `scripts/`) together with all prebuilt Docker images. Submodule source trees are excluded — only the built images are shipped. One file to transfer.
+
+### Step 1 — Build and export on the build host
+
+Clone the repository (with submodules) and build + export everything in one command:
+
+```bash
+git clone --recurse-submodules https://github.com/ilya-maltsev/privacyidea-docker.git
+cd privacyidea-docker
+bash build-images.sh all
+```
+
+This runs `build-images.sh` with the `all` argument, which:
+1. Initializes git submodules (`rlm_python3`, `pi-vpn-pooler`, `pi-custom-captive`)
+2. Pulls infrastructure images (`postgres:16-alpine`, `nginx:stable-alpine`, `osixia/openldap:latest`)
+3. Builds all 4 application images (`privacyidea-docker:3.13`, `privacyidea-freeradius:latest`, `pi-vpn-pooler:latest`, `pi-custom-captive:latest`)
+4. Saves all 7 Docker images to `docker-images.tar`
+5. Packs the repo directory (with `docker-images.tar` inside) into `privacyidea-images.tar.gz`, excluding submodule source trees (`rlm_python3/`, `pi-vpn-pooler/`, `pi-custom-captive/`) and `.git/` — only runtime files (Makefile, compose files, environment, templates, configs) are included
+6. Cleans up the intermediate `docker-images.tar`
+
+If images are already built, export only:
+
+```bash
+bash build-images.sh export
+```
+
+### Step 2 — Transfer to the remote host
+
+Only one file to transfer:
+
+```bash
+scp privacyidea-images.tar.gz user@remote:/opt/
+```
+
+> [!Note]
+> The remote host only needs Docker (with Compose V2) and `make` installed — no git, no BuildKit, no internet access.
+
+### Step 3 — Extract, import and start on the remote host
+
+```bash
+# Extract the archive (creates /opt/privacyidea-docker/ with everything inside)
+tar xzf /opt/privacyidea-images.tar.gz -C /opt/
+cd /opt/privacyidea-docker
+
+# Import Docker images from docker-images.tar and clean up
+bash build-images.sh import
+
+# Generate secrets and update environment/application-prod.env
+make secrets
+# Copy the printed values into environment/application-prod.env
+
+# Set TLS certificate paths in environment/application-prod.env
+# NGINX_TLS_CERT_PATH=/etc/ssl/private/privacyidea.pem
+# NGINX_TLS_KEY_PATH=/etc/ssl/private/privacyidea.key
+
+# Set up service user, permissions and systemd unit
+sudo bash setup-service.sh privacyidea /opt/privacyidea-docker
+
+# Start the production stack
+sudo systemctl start privacyidea-docker
+```
+
+### `build-images.sh` reference
+
+| Command | Description |
+|---------|-------------|
+| `bash build-images.sh build` | Build all application images and pull infrastructure images (default) |
+| `bash build-images.sh export` | Save Docker images + repo into `privacyidea-images.tar.gz` (images must already exist) |
+| `bash build-images.sh import` | Load Docker images from `docker-images.tar` (extract archive first, no internet required) |
+| `bash build-images.sh all` | Build + export in one step |
+
+**Images included in the archive:**
+
+| Image | Type |
+|-------|------|
+| `privacyidea-docker:3.13` | Application (built locally) |
+| `privacyidea-freeradius:latest` | Application (built locally) |
+| `pi-vpn-pooler:latest` | Application (built locally) |
+| `pi-custom-captive:latest` | Application (built locally) |
+| `postgres:16-alpine` | Infrastructure (pulled) |
+| `nginx:stable-alpine` | Infrastructure (pulled) |
+| `osixia/openldap:latest` | Infrastructure (pulled) |
 
 ## Syslog and DEBUG logging
 
@@ -733,19 +859,25 @@ chcon -R -t container_file_t PATHTOHOSTDIR
    ```
 #### How can I create a backup of my data?
 
-- Save environment files (**enckey** ect.) which are stored persistent in the containers volume. 
-- Dump your database manually:
+All persistent data is stored under `data/` in the working directory:
 
-For the example stack, use the db container: 
+| Directory | Contents |
+|-----------|----------|
+| `data/pgdata/` | PostgreSQL database files |
+| `data/pidata/` | privacyIDEA persistent config (enckey, etc.) |
+| `data/vpn_pooler_data/` | VPN Pooler pool definitions (`pools.yaml`) |
+| `data/vpn_pooler_static/` | VPN Pooler collected static files |
+| `data/captive_static/` | Captive Portal collected static files |
+| `data/rsyslog_logs/` | rsyslog log files (fullstack only) |
 
-```
-docker exec -it prod-db-1 pg_dump -U pi pi
-```
+Back up the entire `data/` directory, or selectively:
 
-To back up VPN Pooler pool definitions, copy the YAML file from the `vpn_pooler_data` volume:
+```bash
+# Full backup
+tar czf backup-$(date +%F).tar.gz data/
 
-```
-docker cp prod-vpn_pooler-1:/app/data/pools.yaml ./pools-backup.yaml
+# Database dump
+docker exec -it prod-db-1 pg_dump -U pi pi > pi-dump.sql
 ```
 
 ## Changelog

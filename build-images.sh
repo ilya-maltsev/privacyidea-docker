@@ -5,15 +5,17 @@
 # Usage:
 #   bash build-images.sh              # build all images (default)
 #   bash build-images.sh build        # same as above
-#   bash build-images.sh export       # export to privacyidea-images.tar.gz
-#   bash build-images.sh import       # import from privacyidea-images.tar.gz
+#   bash build-images.sh export       # export repo + Docker images to privacyidea-images.tar.gz
+#   bash build-images.sh import       # load Docker images from docker-images.tar (extract archive first)
 #   bash build-images.sh all          # build + export
 #
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_NAME="$(basename "${SCRIPT_DIR}")"
 ARCHIVE="${SCRIPT_DIR}/privacyidea-images.tar.gz"
+DOCKER_IMAGES_TAR="docker-images.tar"
 
 # Application images (locally built)
 APP_IMAGES="privacyidea-docker:3.13 privacyidea-freeradius:latest pi-vpn-pooler:latest pi-custom-captive:latest"
@@ -69,26 +71,45 @@ build_images() {
 }
 
 export_images() {
-    echo "=== Exporting images to ${ARCHIVE} ==="
-    docker save ${ALL_IMAGES} | gzip > "${ARCHIVE}"
+    echo "=== Saving Docker images to ${DOCKER_IMAGES_TAR} ==="
+    docker save ${ALL_IMAGES} > "${SCRIPT_DIR}/${DOCKER_IMAGES_TAR}"
+
+    echo "=== Creating archive (repo + Docker images) ==="
+    local TMPARCHIVE
+    TMPARCHIVE="$(mktemp "$(dirname "${SCRIPT_DIR}")/.privacyidea-images.XXXXXX.tar.gz")"
+    tar czf "${TMPARCHIVE}" \
+        -C "$(dirname "${SCRIPT_DIR}")" \
+        --exclude='.git' \
+        --exclude='rlm_python3' \
+        --exclude='pi-vpn-pooler' \
+        --exclude='pi-custom-captive' \
+        --exclude='docker-compose.dev.yaml' \
+        "${REPO_NAME}"
+
+    mv "${TMPARCHIVE}" "${ARCHIVE}"
+    rm -f "${SCRIPT_DIR}/${DOCKER_IMAGES_TAR}"
     echo "  $(du -h "${ARCHIVE}" | cut -f1)  ${ARCHIVE}"
     echo "=== Export done ==="
 }
 
 import_images() {
-    if [ ! -f "${ARCHIVE}" ]; then
-        echo "ERROR: ${ARCHIVE} not found."
-        echo "Run '$(basename "$0") export' first or copy the archive here."
+    if [ ! -f "${SCRIPT_DIR}/${DOCKER_IMAGES_TAR}" ]; then
+        echo "ERROR: ${DOCKER_IMAGES_TAR} not found in ${SCRIPT_DIR}."
+        echo "Extract the archive first:"
+        echo "  tar xzf privacyidea-images.tar.gz -C /opt/"
+        echo "  cd /opt/${REPO_NAME}"
+        echo "  bash build-images.sh import"
         exit 1
     fi
-    echo "=== Importing images from ${ARCHIVE} ==="
-    gunzip -c "${ARCHIVE}" | docker load
+    echo "=== Loading Docker images from ${DOCKER_IMAGES_TAR} ==="
+    docker load < "${SCRIPT_DIR}/${DOCKER_IMAGES_TAR}"
+    rm -f "${SCRIPT_DIR}/${DOCKER_IMAGES_TAR}"
     echo ""
     echo "=== Images loaded ==="
     docker images --format "  {{.Repository}}:{{.Tag}}  {{.Size}}" \
         | grep -E "^  (privacyidea-|pi-vpn-|pi-custom-|nginx|postgres|osixia)" || true
     echo ""
-    echo "Now run:  docker compose --profile=fullstack up -d"
+    echo "Configure environment/application-prod.env, then run:  make stack"
 }
 
 CMD="${1:-build}"
