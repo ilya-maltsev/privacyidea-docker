@@ -1,19 +1,18 @@
 services:
   db:
     image: postgres:16-alpine
-    environment:
-      POSTGRES_DB: ${DB_NAME:-pi}
-      POSTGRES_USER: ${DB_USER:-pi}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-superSecret}
+    env_file:
+      - environment/${TAG:-prod}/db.env
     ports:
       - "${DB_PORT:-5432}:5432"
     volumes:
       - ./data/pgdata:/var/lib/postgresql/data:rw,Z
+      - /etc/hosts:/etc/hosts:ro
     networks:
       - privacyidea
     restart: always
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-pi}"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-pi}"]
       interval: 5s
       retries: 5
       start_period: 30s
@@ -37,19 +36,12 @@ services:
         delay: 3s
         window: 60s
     env_file:
-      - ${ENVIRONMENT}
-    environment:
-      PI_SYSLOG_ENABLED: ${PI_SYSLOG_ENABLED:-false}
-      PI_SYSLOG_HOST: ${PI_SYSLOG_HOST:-}
-      PI_SYSLOG_PORT: ${PI_SYSLOG_PORT:-514}
-      PI_SYSLOG_PROTO: ${PI_SYSLOG_PROTO:-udp}
-      PI_SYSLOG_FACILITY: ${PI_SYSLOG_FACILITY:-local1}
-      PI_SYSLOG_TAG: ${PI_SYSLOG_TAG:-privacyidea}
-      PI_SYSLOG_LEVEL: ${PI_SYSLOG_LEVEL:-INFO}
+      - environment/${TAG:-prod}/privacyidea.env
     ports:
       - "${PI_PORT:-8080}:${PI_PORT:-8080}"
     volumes:
       - ./data/pidata:/privacyidea/etc/persistent:rw,Z
+      - /etc/hosts:/etc/hosts:ro
       - type: bind
         source: scripts/
         target: /privacyidea/scripts/
@@ -75,7 +67,7 @@ services:
   reverse_proxy:
     image: nginx:stable-alpine
     environment:
-      APP_PORT: ${PI_PORT}
+      APP_PORT: ${PI_PORT:-8080}
       SERVERNAME: ${PROXY_SERVERNAME:-localhost}
       SSL_CERT: /etc/nginx/ssl/pi.pem
       SSL_KEY: /etc/nginx/ssl/pi.key
@@ -104,6 +96,7 @@ services:
         source: ./templates/502.html
         target: /etc/privacyidea/customization/502.html
         read_only: true
+      - /etc/hosts:/etc/hosts:ro
     networks:
       - privacyidea
     restart: always
@@ -115,20 +108,8 @@ services:
     build:
       context: ./rlm_python3
     image: privacyidea-freeradius:latest
-    environment:
-      RADIUS_PI_HOST: https://reverse_proxy
-      RADIUS_PI_REALM: ${RADIUS_PI_REALM:-}
-      RADIUS_PI_RESCONF: ${RADIUS_PI_RESCONF:-}
-      RADIUS_PI_SSLCHECK: ${RADIUS_PI_SSLCHECK:-false}
-      RADIUS_DEBUG: ${RADIUS_DEBUG:-false}
-      RADIUS_PI_TIMEOUT: ${RADIUS_PI_TIMEOUT:-10}
-      RADIUS_SYSLOG: ${RADIUS_SYSLOG:-true}
-      RADIUS_SYSLOG_TAG: ${RADIUS_SYSLOG_TAG:-privacyidea-radius}
-      RADIUS_SYSLOG_FACILITY: ${RADIUS_SYSLOG_FACILITY:-auth}
-      RADIUS_SYSLOG_HOST: ${RADIUS_SYSLOG_HOST:-}
-      RADIUS_SYSLOG_PORT: ${RADIUS_SYSLOG_PORT:-514}
-      RADIUS_SYSLOG_PROTO: ${RADIUS_SYSLOG_PROTO:-udp}
-      RADIUS_SYSLOG_LEVEL: ${RADIUS_SYSLOG_LEVEL:-INFO}
+    env_file:
+      - environment/${TAG:-prod}/freeradius.env
     ports:
       - "${RADIUS_PORT:-1812}:1812/tcp"
       - "${RADIUS_PORT:-1812}:1812/udp"
@@ -142,6 +123,7 @@ services:
         source: ./templates/clients.conf
         target: /etc/raddb/clients.conf
         read_only: true
+      - /etc/hosts:/etc/hosts:ro
     networks:
       - privacyidea
     restart: always
@@ -153,25 +135,14 @@ services:
     build:
       context: ./pi-vpn-pooler
     image: pi-vpn-pooler:latest
+    env_file:
+      - environment/${TAG:-prod}/vpn_pooler.env
     environment:
-      PI_API_URL: ${VPN_POOLER_PI_API_URL:-https://reverse_proxy:443}
-      PI_VERIFY_SSL: ${VPN_POOLER_PI_VERIFY_SSL:-false}
-      DJANGO_SECRET_KEY: ${VPN_POOLER_DJANGO_SECRET_KEY:-changeme}
-      DJANGO_DEBUG: ${VPN_POOLER_DJANGO_DEBUG:-false}
-      DJANGO_ALLOWED_HOSTS: ${VPN_POOLER_DJANGO_ALLOWED_HOSTS:-*}
-      CSRF_TRUSTED_ORIGINS: ${VPN_POOLER_CSRF_TRUSTED_ORIGINS:-https://localhost:5443}
-      DJANGO_LOG_LEVEL: ${VPN_POOLER_DJANGO_LOG_LEVEL:-INFO}
       POOLS_FILE: /app/data/pools.yaml
-      SYSLOG_ENABLED: ${VPN_POOLER_SYSLOG_ENABLED:-false}
-      SYSLOG_HOST: ${VPN_POOLER_SYSLOG_HOST:-}
-      SYSLOG_PORT: ${VPN_POOLER_SYSLOG_PORT:-514}
-      SYSLOG_PROTO: ${VPN_POOLER_SYSLOG_PROTO:-udp}
-      SYSLOG_FACILITY: ${VPN_POOLER_SYSLOG_FACILITY:-local0}
-      SYSLOG_TAG: ${VPN_POOLER_SYSLOG_TAG:-pi-vpn-pooler}
-      SYSLOG_LEVEL: ${VPN_POOLER_SYSLOG_LEVEL:-INFO}
     volumes:
       - ./data/vpn_pooler_static:/app/staticfiles
       - ./data/vpn_pooler_data:/app/data
+      - /etc/hosts:/etc/hosts:ro
     expose:
       - "8000"
     networks:
@@ -185,32 +156,11 @@ services:
     build:
       context: ./pi-custom-captive
     image: pi-custom-captive:latest
-    environment:
-      PI_API_URL: ${CAPTIVE_PI_API_URL:-https://reverse_proxy:443}
-      PI_VERIFY_SSL: ${CAPTIVE_PI_VERIFY_SSL:-false}
-      PI_REALM: ${CAPTIVE_PI_REALM:-defrealm}
-      OTPAUTH_ISSUER: ${CAPTIVE_OTPAUTH_ISSUER:-privacyIDEA}
-      OTPAUTH_LABEL_ATTR: ${CAPTIVE_OTPAUTH_LABEL_ATTR:-username}
-      TOKEN_SERIAL_PREFIX: ${CAPTIVE_TOKEN_SERIAL_PREFIX:-}
-      TOKEN_SERIAL_SUFFIX: ${CAPTIVE_TOKEN_SERIAL_SUFFIX:-username}
-      MTLS_ENABLED: ${CAPTIVE_MTLS_ENABLED:-false}
-      MTLS_USER_HEADER: ${CAPTIVE_MTLS_USER_HEADER:-HTTP_X_SSL_USER}
-      MTLS_VERIFY_HEADER: ${CAPTIVE_MTLS_VERIFY_HEADER:-HTTP_X_SSL_VERIFY}
-      MTLS_REQUIRED_VERIFY_VALUE: ${CAPTIVE_MTLS_REQUIRED_VERIFY_VALUE:-SUCCESS}
-      DJANGO_SECRET_KEY: ${CAPTIVE_DJANGO_SECRET_KEY:-changeme}
-      DJANGO_DEBUG: ${CAPTIVE_DJANGO_DEBUG:-false}
-      DJANGO_ALLOWED_HOSTS: ${CAPTIVE_DJANGO_ALLOWED_HOSTS:-*}
-      CSRF_TRUSTED_ORIGINS: ${CAPTIVE_CSRF_TRUSTED_ORIGINS:-https://localhost:6443}
-      DJANGO_LOG_LEVEL: ${CAPTIVE_DJANGO_LOG_LEVEL:-INFO}
-      SYSLOG_ENABLED: ${CAPTIVE_SYSLOG_ENABLED:-false}
-      SYSLOG_HOST: ${CAPTIVE_SYSLOG_HOST:-}
-      SYSLOG_PORT: ${CAPTIVE_SYSLOG_PORT:-514}
-      SYSLOG_PROTO: ${CAPTIVE_SYSLOG_PROTO:-udp}
-      SYSLOG_FACILITY: ${CAPTIVE_SYSLOG_FACILITY:-local2}
-      SYSLOG_TAG: ${CAPTIVE_SYSLOG_TAG:-pi-custom-captive}
-      SYSLOG_LEVEL: ${CAPTIVE_SYSLOG_LEVEL:-INFO}
+    env_file:
+      - environment/${TAG:-prod}/captive.env
     volumes:
       - ./data/captive_static:/app/staticfiles
+      - /etc/hosts:/etc/hosts:ro
     expose:
       - "8000"
     networks:

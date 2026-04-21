@@ -10,8 +10,9 @@ WorkingDirectory=__WORKDIR__
 TimeoutStartSec=0
 RemainAfterExit=yes
 
-ExecStart=/usr/bin/docker compose --env-file=environment/application-prod.env -p prod --profile=stack up -d
-ExecStop=/usr/bin/docker compose --env-file=environment/application-prod.env -p prod --profile=stack stop
+Environment=TAG=prod
+ExecStart=/usr/bin/docker compose --env-file=environment/prod/compose.env -p prod --profile=stack up -d
+ExecStop=/usr/bin/docker compose --env-file=environment/prod/compose.env -p prod --profile=stack stop
 
 [Install]
 WantedBy=multi-user.target

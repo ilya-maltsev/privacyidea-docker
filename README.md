@@ -34,7 +34,7 @@ Username / password: admin / admin
 | Directory | Description |
 |-----------|-------------|
 | *conf* | contains *pi.cfg* and *logging.cfg* files which is included in the image build process.|
-| *environment* | contains different example-environment files for a whole stack via docker compose|
+| *environment* | per-service environment files organized by stack (`environment/prod/`, `environment/dev/`). Each service has its own `.env` file; `compose.env` carries compose-level variables (ports, TLS paths).|
 | *scripts* | contains custom scripts for the privacyIDEA script-handler. The directory will be mounted into the container when composing a [stack](#compose-a-privacyidea-stack). Scripts must be executable (chmod +x)|
 | *templates*| contains files used for different services (nginx, radius ...), the self-signed dev SSL certificate (`pi.pem` / `pi.key`), and the systemd service template. For production TLS, set `NGINX_TLS_CERT_PATH` / `NGINX_TLS_KEY_PATH` in your env file to point at your real cert/key (PEM without passphrase; `.pfx` not supported). |
 | *templates/rsyslog*| Dockerfile and config for the rsyslog log-collector container (fullstack profile only).|
@@ -109,6 +109,17 @@ bash build-images.sh export    # export only (images must exist)
 bash build-images.sh import    # import from docker-images.tar (extract archive first)
 ```
 
+You can operate on specific images by passing short names after the command:
+
+```
+bash build-images.sh build captive pooler    # build only captive + vpn_pooler
+bash build-images.sh export pi radius        # export selected images + repo
+bash build-images.sh all captive             # build + export captive only
+bash build-images.sh help                    # show available short names
+```
+
+Short names: `privacyidea` (`pi`), `freeradius` (`radius`), `pooler` (`vpn_pooler`), `captive`, `postgres`, `nginx`, `openldap` (`ldap`).
+
 ### Build a specific privacyIDEA version
 ```
 make build PI_VERSION=3.13 PI_VERSION_BUILD=3.13
@@ -160,10 +171,11 @@ make distclean
 | ```build-all``` | |Build all images (privacyIDEA, FreeRADIUS, VPN Pooler, Captive Portal, rsyslog) and pull infrastructure images| ```make build-all```|
 | ```push``` | ```REGISTRY```|Tag and push the image to the registry. Optional: specify the registry URI. Defaults to *localhost:5000*| ```make push REGISTRY=docker.io/your-registry/privacyidea-docker```|
 | ```run``` |  ```PORT``` <br> ```TAG```  |Run a standalone container with gunicorn and sqlite. Optional: specify the prefix tag of the container name and listen port. Defaults to *pi* and port *8080*| ```make run TAG=prod PORT=8888```|
-| ```secret``` | |Generate secrets to use in an environment file | ```make secret```|
+| ```secrets``` | ```TAG``` | Generate and write random secrets into the per-service env files under `environment/{TAG}/`. Covers `PI_SECRET`, `PI_PEPPER`, `PI_ADMIN_PASS`, `PI_ENCKEY`, `DB_PASSWORD` (synced between `db.env` and `privacyidea.env`), and Django secret keys for VPN Pooler and Captive Portal. | ```make secrets```, ```make secrets TAG=dev```|
 | ```cert``` | |Generate a self-signed certificate for the reverse proxy container in *./templates* and **overwrite** the existing one | ```make cert```|
 | ```stack``` |```TAG``` ```PROFILE```| Run a production stack (db, privacyidea, reverse_proxy, freeradius, vpn_pooler, captive). Default profile is *stack*. | ```make stack```, ```make stack TAG=dev PROFILE=fullstack```|
 | ```fullstack``` || Run a full dev/test stack (all stack services + LDAP + rsyslog) | ```make fullstack```
+| ```superadmin-policy``` | ```TAG``` | Import the superadmin policy (`templates/superadmin-policy.json`) into a running privacyIDEA instance. Includes admin API permissions, WebUI dashboard, and user self-service policy for captive portal TOTP enrollment. | ```make superadmin-policy```, ```make superadmin-policy TAG=dev```|
 | ```resolver``` || Create resolvers and realm for fullstack | ```make resolver```
 | ```install-service``` |```SERVICE_USER``` ```SERVICE_WORKDIR```| Create service user (if needed), add to docker group, set directory ownership, install and enable systemd service. Defaults to user `privacyidea` and current directory. | ```make install-service```, ```make install-service SERVICE_USER=privacyidea SERVICE_WORKDIR=/opt/privacyidea-docker```|
 | ```uninstall-service``` || Stop, disable and remove the systemd service | ```make uninstall-service```|
@@ -181,7 +193,7 @@ With the use of different environment files for different full-stacks, you can d
 
 ```mermaid
 graph TD;
-  a1("--env-file=environment/application-prod.env");
+  a1("--env-file=environment/prod/compose.env");
   w1(https://localhost:8443);
   w2(RADIUS 1812);
   w3(LDAP 1389);
@@ -230,7 +242,7 @@ graph TD;
   class a1,st1 heading;
 ```
 
-Find example .env files in the *environment* directory.
+Environment files are organized per service under `environment/prod/` and `environment/dev/`. Each service has its own `.env` file; `compose.env` carries compose-level variables (ports, TLS paths). See [Environment Variables](#environment-variables) for details.
 
 ### Profiles
 
@@ -241,7 +253,7 @@ Find example .env files in the *environment* directory.
 | `ldap` | openldap | LDAP directory only (add to other profiles) |
 
 > [!Note]
-> **Dev-only resolver seed.** `application-dev.env` sets `PI_SEED_RESOLVERS=true`, which tells `entrypoint.py` to run `pi-manage config import -i /privacyidea/etc/persistent/resolver.json` on first boot. The seed is idempotent (gated on a `resolver_imported` flag file) and is **not** enabled in `application-prod.env` — prod stacks start with an empty privacyIDEA configuration.
+> **Dev-only resolver seed.** `environment/dev/privacyidea.env` sets `PI_SEED_RESOLVERS=true`, which tells `entrypoint.py` to run `pi-manage config import -i /privacyidea/etc/persistent/resolver.json` on first boot. The seed is idempotent (gated on a `resolver_imported` flag file) and is **not** enabled in the prod env — prod stacks start with an empty privacyIDEA configuration. Use `make superadmin-policy` to import the initial admin policies on prod.
 
 > [!Note]
 > **Dev-only rsyslog collector.** The `fullstack` profile includes an `rsyslog` container that receives syslog messages (UDP 514) from privacyIDEA, FreeRADIUS, VPN Pooler and Captive Portal on the internal Docker network. Logs are written to per-service files inside the `rsyslog_logs` volume (`privacyidea.log`, `privacyidea-radius.log`, `pi-vpn-pooler.log`, `pi-custom-captive.log`, `all.log`). `application-dev.env` pre-configures all four services to forward to this collector. The `stack` (production) profile does **not** include rsyslog — configure your own external rsyslog host via the `*_SYSLOG_HOST` variables instead.
@@ -286,10 +298,10 @@ make build-all stack
 > [!Note]
 > In production, `make cert` is **not needed** — set `NGINX_TLS_CERT_PATH` and `NGINX_TLS_KEY_PATH` in your environment file to point at your existing certificate and key. Only use `make cert` for dev/testing with a self-signed pair.
 
-Run a stack with project the name *prod* and environment variables files from *environment/application-prod.env*
+Run a stack with project the name *prod* and environment variables files from *environment/prod/compose.env*
 
 ```
-  $ docker compose --env-file=environment/application-prod.env -p prod --profile=stack up -d
+  $ TAG=prod docker compose --env-file=environment/prod/compose.env -p prod --profile=stack up -d
 ```
 Or simple run a ```make``` target.
 
@@ -356,7 +368,7 @@ docker compose -p prod down
 You can start the stack in the background with console detached using the **-d** parameter.
 
 ```
-  $ docker compose --env-file=environment/application-prod.env -p prod --profile=stack up -d
+  $ TAG=prod docker compose --env-file=environment/prod/compose.env -p prod --profile=stack up -d
 ```
 
 Full example including build with  ```make```targets:
@@ -377,7 +389,7 @@ make cert build-all stack PI_VERSION=3.13 PI_VERSION_BUILD=3.13 TAG=pidev
 Usage:
 
 ```
-docker compose --env-file environment/application-dev.env \
+TAG=dev docker compose --env-file environment/dev/compose.env \
   -f docker-compose.yaml -f docker-compose.dev.yaml \
   --profile fullstack up --build
 ```
@@ -391,7 +403,7 @@ Now you can deploy additional containers like OpenLDAP for user realms or Ownclo
 Have fun!
 
 > [!IMPORTANT] 
->- **Dev** uses Docker named volumes (managed by Docker). **Prod** uses host directories under `data/` (set via `*_PATH` variables in `application-prod.env`). Neither is deleted by `make clean` or `docker compose down` — use `make distclean` to remove both.
+>- **Dev** uses Docker named volumes (managed by Docker). **Prod** uses host directories under `data/`. Neither is deleted by `make clean` or `docker compose down` — use `make distclean` to remove both.
 >- Delete the files in `data/pidata/` (prod) or the `pidata` volume (dev) if you want to bootstrap again. This will not delete an existing database except sqlite databases!
 >- Compose a stack takes some time until the database tables are deployed and privacyIDEA is ready to run. Check health status of the container.
 
@@ -413,6 +425,25 @@ This project uses **PostgreSQL 16** as the database backend for privacyIDEA.
 
 ## Environment Variables
 
+### Per-service env files
+
+Environment is organized into per-service files under `environment/{prod,dev}/`:
+
+```
+environment/prod/
+├── compose.env        # compose-level: ports, TLS paths (passed via --env-file)
+├── db.env             # PostgreSQL: POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD
+├── privacyidea.env    # privacyIDEA: PI_*, DB_*, syslog
+├── freeradius.env     # FreeRADIUS: RADIUS_* vars
+├── vpn_pooler.env     # VPN Pooler: Django, syslog (unprefixed names)
+├── captive.env        # Captive Portal: Django, mTLS, syslog (unprefixed names)
+```
+
+Each service's `env_file` is set in `docker-compose.yaml` using `environment/${TAG:-prod}/<service>.env`. The `TAG` variable selects the environment directory (`prod` or `dev`).
+
+> [!Note]
+> Variables in per-service files use the **actual names** the application expects (e.g. `DJANGO_SECRET_KEY`, not `VPN_POOLER_DJANGO_SECRET_KEY`). The old prefix-stripping logic has been removed from `docker-compose.yaml`.
+
 ### Data storage
 
 **Prod** (`docker-compose.yaml`): persistent data is stored in host directories under `./data/` — visible, easy to back up, owned by the service user.
@@ -431,10 +462,9 @@ This project uses **PostgreSQL 16** as the database backend for privacyIDEA.
 > [!Note]
 > `docker-compose.yaml` uses `./data/*` bind mounts and has no `volumes:` section. The dev override (`docker-compose.dev.yaml`) declares named volumes and overrides the mounts. `make fullstack` loads the override automatically; `make stack` uses the base file only.
 
-### privacyIDEA
+### privacyIDEA (`privacyidea.env`)
 | Variable | Default | Description
 |-----|---------|-------------
-```ENVIRONMENT``` | environment/application-prod.env | Used to set the correct environment file (env_file) in the docker compose, which is used by the container. Use a relative filename here.
 ```PI_VERSION```|latest| Set the used image version
 ```PI_ADMIN```|admin| login name of the initial administrator
 ```PI_ADMIN_PASS```|admin| password for the initial administrator
@@ -446,7 +476,7 @@ This project uses **PostgreSQL 16** as the database backend for privacyIDEA.
 ```PI_LOGLEVEL```|INFO| Log level in uppercase (DEBUG, INFO, WARNING, ect.). 
 ```SUPERUSER_REALM```|"admin,helpdesk"| Admin realms, which can be used for policies in privacyIDEA. Comma separated list. See the privacyIDEA documentation for more information.
 ```PI_SQLALCHEMY_ENGINE_OPTIONS```| False | Set pool_pre_ping option. Set to ```True``` for DB clusters.
-```PI_SEED_RESOLVERS```| *(unset)* | Dev-only one-shot seed. When set to `true`, `entrypoint.py` runs `pi-manage config import -i /privacyidea/etc/persistent/resolver.json` on first boot and writes a `resolver_imported` flag file so re-runs don't re-import or overwrite admin tweaks. Set only in `application-dev.env`; leave unset in prod.
+```PI_SEED_RESOLVERS```| *(unset)* | Dev-only one-shot seed. When set to `true`, `entrypoint.py` runs `pi-manage config import -i /privacyidea/etc/persistent/resolver.json` on first boot and writes a `resolver_imported` flag file so re-runs don't re-import or overwrite admin tweaks. Set only in `environment/dev/privacyidea.env`; leave unset in prod.
 ```PI_SYSLOG_ENABLED```| false | Enable remote syslog forwarding from the privacyIDEA application. When `false`, logs only go to stdout / container logs.
 ```PI_SYSLOG_HOST```| *(empty)* | Remote rsyslog host. Required when `PI_SYSLOG_ENABLED=true`.
 ```PI_SYSLOG_PORT```| 514 | Remote rsyslog port.
@@ -457,7 +487,7 @@ This project uses **PostgreSQL 16** as the database backend for privacyIDEA.
 
 **Additional environment variables** starting with ```PI_``` will automatically added to ```pi.cfg```
 
-### DB connection parameters
+### DB connection parameters (`db.env` + `privacyidea.env`)
 | Variable | Default | Description
 |-----|---------|-------------
 ```DB_HOST```| db | Database host
@@ -467,7 +497,7 @@ This project uses **PostgreSQL 16** as the database backend for privacyIDEA.
 ```DB_PASSWORD```| superSecret | The database password.
 ```DB_API```| postgresql+psycopg2 | Database driver for SQLAlchemy
 
-### Reverse proxy parameters (for compose/stack)
+### Reverse proxy parameters (`compose.env`)
 
 The nginx `reverse_proxy` terminates TLS for privacyIDEA (host `${PROXY_PORT}` → container `:443`), VPN Pooler (host `${VPN_POOLER_PORT}` → container `:444`) and Captive Portal (host `${CAPTIVE_PORT}` → container `:445`), using the same certificate pair. The `vpn_pooler` and `captive` containers speak plain HTTP on `:8000` inside the compose network and are not published to the host.
 
@@ -478,7 +508,7 @@ The nginx `reverse_proxy` terminates TLS for privacyIDEA (host `${PROXY_PORT}` �
 ```NGINX_TLS_CERT_PATH```| ./templates/pi.pem | **Host-side** path to the TLS certificate file. This path is bind-mounted into the container. Leave empty to use the dev self-signed cert at `./templates/pi.pem`. In prod, set to the absolute path of your real certificate (e.g. `/etc/ssl/private/privacyidea.pem`).
 ```NGINX_TLS_KEY_PATH```| ./templates/pi.key | **Host-side** path to the TLS private key file. Same mechanism as `NGINX_TLS_CERT_PATH`. In prod, set to the absolute path of your real key (e.g. `/etc/ssl/private/privacyidea.key`).
 
-### RADIUS parameters (for compose/fullstack)
+### RADIUS parameters (`freeradius.env`)
 | Variable | Default | Description
 |-----|---------|-------------
 ```RADIUS_PORT```| 1812 | Exposed (external) radius port tcp/udp
@@ -496,53 +526,57 @@ The nginx `reverse_proxy` terminates TLS for privacyIDEA (host `${PROXY_PORT}` �
 ```RADIUS_SYSLOG_TAG```| privacyidea-radius | Syslog program name / ident.
 ```RADIUS_SYSLOG_LEVEL```| INFO | Minimum level forwarded to syslog: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. Must be `DEBUG` to see full-packet dumps from `RADIUS_DEBUG=true`.
 
-### VPN Pooler parameters (for compose/vpn_pooler)
+### VPN Pooler parameters (`vpn_pooler.env`)
 
 The VPN Pooler is **stateless** — no database. Pool definitions are stored in a YAML file on a Docker volume (`/app/data/pools.yaml`). Allocations are read live from privacyIDEA user attributes on every request. Login supports optional 2FA: users with an active TOTP token in privacyIDEA are prompted for a one-time code after password authentication; users without TOTP skip the OTP step.
 
 | Variable | Default | Description
 |-----|---------|-------------
-```VPN_POOLER_PI_API_URL```| https://reverse_proxy:443 | privacyIDEA API URL
-```VPN_POOLER_PI_VERIFY_SSL```| false | Verify SSL certificate of privacyIDEA API
-```VPN_POOLER_DJANGO_SECRET_KEY```| changeme | Django secret key
-```VPN_POOLER_DJANGO_DEBUG```| false | Enable Django debug mode
-```VPN_POOLER_DJANGO_ALLOWED_HOSTS```| * | Django allowed hosts
-```VPN_POOLER_CSRF_TRUSTED_ORIGINS```| https://localhost:5443 | CSRF trusted origins
-```VPN_POOLER_PORT```| 5443 | Exposed port for VPN Pooler
-```VPN_POOLER_SYSLOG_ENABLED```| false | Enable remote syslog forwarding from Django. When `false`, logs only go to stdout / container logs.
-```VPN_POOLER_SYSLOG_HOST```| *(empty)* | Remote rsyslog host. Required when `VPN_POOLER_SYSLOG_ENABLED=true`.
-```VPN_POOLER_SYSLOG_PORT```| 514 | Remote rsyslog port.
-```VPN_POOLER_SYSLOG_PROTO```| udp | Transport for remote rsyslog: `udp` or `tcp`.
-```VPN_POOLER_SYSLOG_FACILITY```| local0 | Syslog facility.
-```VPN_POOLER_SYSLOG_TAG```| pi-vpn-pooler | Syslog program name / ident.
-```VPN_POOLER_SYSLOG_LEVEL```| INFO | Minimum level forwarded: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. Set to `DEBUG` to capture full HTTP request/response packets against the privacyIDEA API. See [Syslog and DEBUG logging](#syslog-and-debug-logging).
+```PI_API_URL```| https://reverse_proxy:443 | privacyIDEA API URL
+```PI_VERIFY_SSL```| false | Verify SSL certificate of privacyIDEA API
+```DJANGO_SECRET_KEY```| changeme | Django secret key
+```DJANGO_DEBUG```| false | Enable Django debug mode
+```DJANGO_ALLOWED_HOSTS```| * | Django allowed hosts
+```CSRF_TRUSTED_ORIGINS```| https://localhost:5443 | CSRF trusted origins
+```SYSLOG_ENABLED```| false | Enable remote syslog forwarding from Django. When `false`, logs only go to stdout / container logs.
+```SYSLOG_HOST```| *(empty)* | Remote rsyslog host. Required when `SYSLOG_ENABLED=true`.
+```SYSLOG_PORT```| 514 | Remote rsyslog port.
+```SYSLOG_PROTO```| udp | Transport for remote rsyslog: `udp` or `tcp`.
+```SYSLOG_FACILITY```| local0 | Syslog facility.
+```SYSLOG_TAG```| pi-vpn-pooler | Syslog program name / ident.
+```SYSLOG_LEVEL```| INFO | Minimum level forwarded: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. Set to `DEBUG` to capture full HTTP request/response packets against the privacyIDEA API. See [Syslog and DEBUG logging](#syslog-and-debug-logging).
 
-### Captive Portal parameters (for compose/captive)
+> [!Note]
+> The `VPN_POOLER_PORT` variable has moved to `compose.env` since it's a compose-level port mapping.
+
+### Captive Portal parameters (`captive.env`)
 
 The captive portal is stateless (no DB) and uses **each actor's own PI JWT** — there is no service account. A regular user logs in with their AD/LDAP credentials, PI returns a user-scope JWT, and every PI call the portal makes during that session (lockout check, token init) runs on *that* JWT so PI auto-scopes to the caller. Admins authenticate with their own admin password; all admin API calls (list tokens of any user, enable/disable/delete) run on the admin's JWT. Mutations require a further TOTP step-up against the admin's own token (`/validate/check`). Admins who have no TOTP in PI stay read-only for the whole session by design.
 
 | Variable | Default | Description
 |-----|---------|-------------
-```CAPTIVE_PI_API_URL```| https://reverse_proxy:443 | privacyIDEA API URL the captive portal calls
-```CAPTIVE_PI_VERIFY_SSL```| false | Verify SSL certificate of the privacyIDEA API
-```CAPTIVE_PI_REALM```| defrealm | The **only** realm the captive portal operates in (single-realm by design)
-```CAPTIVE_DJANGO_SECRET_KEY```| changeme | Django secret key. Use `make secrets` inside the submodule to generate one.
-```CAPTIVE_DJANGO_DEBUG```| false | Enable Django debug mode
-```CAPTIVE_DJANGO_ALLOWED_HOSTS```| * | Django allowed hosts
-```CAPTIVE_CSRF_TRUSTED_ORIGINS```| https://localhost:6443 | CSRF trusted origins
-```CAPTIVE_DJANGO_LOG_LEVEL```| INFO | Django log level
-```CAPTIVE_PORT```| 6443 | Exposed (external) HTTPS port mapped to the reverse-proxy `:445` listener
-```CAPTIVE_MTLS_ENABLED```| false | Opt-in mTLS header-auth for the **user** flow. When `true`, the portal skips the AD/LDAP password step and trusts identity carried in nginx-set headers after an upstream `ssl_verify_client on` succeeded. Admin flow is unaffected. See [`pi-custom-captive/README.md`](pi-custom-captive/README.md) and `templates/nginx-mtls.*.example.conf` in the submodule for the nginx side (includes a `map` regex to extract a login from a named-OID DN component, plus `ssl_ocsp on`). Never enable this while exposing gunicorn (:8000) directly.
-```CAPTIVE_MTLS_USER_HEADER```| HTTP_X_SSL_USER | Django META key carrying the username (matches header `X-SSL-User`).
-```CAPTIVE_MTLS_VERIFY_HEADER```| HTTP_X_SSL_VERIFY | Django META key carrying nginx's `$ssl_client_verify` status (matches header `X-SSL-Verify`).
-```CAPTIVE_MTLS_REQUIRED_VERIFY_VALUE```| SUCCESS | Value the verify header must equal for the request to be accepted.
-```CAPTIVE_SYSLOG_ENABLED```| false | Enable remote syslog forwarding. When `false`, logs only go to stdout / container logs.
-```CAPTIVE_SYSLOG_HOST```| *(empty)* | Remote rsyslog host. Required when `CAPTIVE_SYSLOG_ENABLED=true`.
-```CAPTIVE_SYSLOG_PORT```| 514 | Remote rsyslog port.
-```CAPTIVE_SYSLOG_PROTO```| udp | Transport for remote rsyslog: `udp` or `tcp`.
-```CAPTIVE_SYSLOG_FACILITY```| local2 | Syslog facility.
-```CAPTIVE_SYSLOG_TAG```| pi-custom-captive | Syslog program name / ident.
-```CAPTIVE_SYSLOG_LEVEL```| INFO | Minimum level forwarded: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. Set to `DEBUG` to capture full HTTP request/response packets against the privacyIDEA API. See [Syslog and DEBUG logging](#syslog-and-debug-logging).
+```PI_API_URL```| https://reverse_proxy:443 | privacyIDEA API URL the captive portal calls
+```PI_VERIFY_SSL```| false | Verify SSL certificate of the privacyIDEA API
+```PI_REALM```| defrealm | The **only** realm the captive portal operates in (single-realm by design)
+```DJANGO_SECRET_KEY```| changeme | Django secret key. Use `make secrets` to generate one.
+```DJANGO_DEBUG```| false | Enable Django debug mode
+```DJANGO_ALLOWED_HOSTS```| * | Django allowed hosts
+```CSRF_TRUSTED_ORIGINS```| https://localhost:6443 | CSRF trusted origins
+```DJANGO_LOG_LEVEL```| INFO | Django log level
+```MTLS_ENABLED```| false | Opt-in mTLS header-auth for the **user** flow. When `true`, the portal skips the AD/LDAP password step and trusts identity carried in nginx-set headers after an upstream `ssl_verify_client on` succeeded. Admin flow is unaffected. See [`pi-custom-captive/README.md`](pi-custom-captive/README.md) and `templates/nginx-mtls.*.example.conf` in the submodule for the nginx side (includes a `map` regex to extract a login from a named-OID DN component, plus `ssl_ocsp on`). Never enable this while exposing gunicorn (:8000) directly.
+```MTLS_USER_HEADER```| HTTP_X_SSL_USER | Django META key carrying the username (matches header `X-SSL-User`).
+```MTLS_VERIFY_HEADER```| HTTP_X_SSL_VERIFY | Django META key carrying nginx's `$ssl_client_verify` status (matches header `X-SSL-Verify`).
+```MTLS_REQUIRED_VERIFY_VALUE```| SUCCESS | Value the verify header must equal for the request to be accepted.
+```SYSLOG_ENABLED```| false | Enable remote syslog forwarding. When `false`, logs only go to stdout / container logs.
+```SYSLOG_HOST```| *(empty)* | Remote rsyslog host. Required when `SYSLOG_ENABLED=true`.
+```SYSLOG_PORT```| 514 | Remote rsyslog port.
+```SYSLOG_PROTO```| udp | Transport for remote rsyslog: `udp` or `tcp`.
+```SYSLOG_FACILITY```| local2 | Syslog facility.
+```SYSLOG_TAG```| pi-custom-captive | Syslog program name / ident.
+```SYSLOG_LEVEL```| INFO | Minimum level forwarded: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. Set to `DEBUG` to capture full HTTP request/response packets against the privacyIDEA API. See [Syslog and DEBUG logging](#syslog-and-debug-logging).
+
+> [!Note]
+> The `CAPTIVE_PORT` variable has moved to `compose.env` since it's a compose-level port mapping.
 
 ### LDAP parameters (for compose/fullstack)
 | Variable | Default | Description
@@ -560,9 +594,9 @@ The captive portal is stateless (no DB) and uses **each actor's own PI JWT** —
 The nginx `reverse_proxy` service serves TLS on three ports (privacyIDEA `:443`, VPN Pooler `:444`, Captive Portal `:445`) from a single cert/key pair.
 
 - **Dev**: `make cert` generates `templates/pi.pem` + `templates/pi.key`. When `NGINX_TLS_CERT_PATH` / `NGINX_TLS_KEY_PATH` are empty or unset, compose bind-mounts these self-signed files into the container automatically.
-- **Prod**: set `NGINX_TLS_CERT_PATH` and `NGINX_TLS_KEY_PATH` in `application-prod.env` to the **host-side** absolute paths of your real certificate and key. Compose will bind-mount them into the container. No `make cert` needed. Use PEM format without a passphrase; `.pfx` is not supported.
+- **Prod**: set `NGINX_TLS_CERT_PATH` and `NGINX_TLS_KEY_PATH` in `environment/prod/compose.env` to the **host-side** absolute paths of your real certificate and key. Compose will bind-mount them into the container. No `make cert` needed. Use PEM format without a passphrase; `.pfx` is not supported.
 
-Example (`application-prod.env`):
+Example (`environment/prod/compose.env`):
 ```
 NGINX_TLS_CERT_PATH=/etc/ssl/private/privacyidea.pem
 NGINX_TLS_KEY_PATH=/etc/ssl/private/privacyidea.key
@@ -610,11 +644,12 @@ make uninstall-service
 
 ### Production checklist
 
-1. Set `NGINX_TLS_CERT_PATH` and `NGINX_TLS_KEY_PATH` in `environment/application-prod.env` to your real certificate and key paths. Do **not** use `make cert` in production.
-2. Replace all default secrets (`PI_PEPPER`, `PI_SECRET`, `DB_PASSWORD`, etc.) — use `make secrets` to generate new ones.
+1. Set `NGINX_TLS_CERT_PATH` and `NGINX_TLS_KEY_PATH` in `environment/prod/compose.env` to your real certificate and key paths. Do **not** use `make cert` in production.
+2. Run `make secrets` to generate and write random secrets into `environment/prod/*.env` (covers `PI_SECRET`, `PI_PEPPER`, `PI_ADMIN_PASS`, `PI_ENCKEY`, `DB_PASSWORD`, Django secret keys for VPN Pooler and Captive Portal).
 3. Run `make build-all` to build images (or use `build-images.sh all` for [remote deployment](#remote--offline-deployment-with-archived-images)).
 4. Run `make install-service SERVICE_USER=privacyidea` to create the service user and enable the systemd service.
 5. Start with `sudo systemctl start privacyidea-docker`.
+6. Import the superadmin policy: `make superadmin-policy`. This sets up admin API permissions, the WebUI dashboard/wizard, and the self-service policy for captive portal TOTP enrollment.
 
 ## Remote / offline deployment with archived images
 
@@ -681,11 +716,10 @@ cd /opt/privacyidea-docker
 # Import Docker images from docker-images.tar and clean up
 bash build-images.sh import
 
-# Generate secrets and update environment/application-prod.env
+# Generate and write secrets into environment/prod/*.env
 make secrets
-# Copy the printed values into environment/application-prod.env
 
-# Set TLS certificate paths in environment/application-prod.env
+# Set TLS certificate paths in environment/prod/compose.env
 # NGINX_TLS_CERT_PATH=/etc/ssl/private/privacyidea.pem
 # NGINX_TLS_KEY_PATH=/etc/ssl/private/privacyidea.key
 
@@ -694,6 +728,9 @@ sudo bash setup-service.sh privacyidea /opt/privacyidea-docker
 
 # Start the production stack
 sudo systemctl start privacyidea-docker
+
+# Import the superadmin policy (after the stack is healthy)
+make superadmin-policy
 ```
 
 ### `build-images.sh` reference
@@ -701,9 +738,13 @@ sudo systemctl start privacyidea-docker
 | Command | Description |
 |---------|-------------|
 | `bash build-images.sh build` | Build all application images and pull infrastructure images (default) |
+| `bash build-images.sh build captive pooler` | Build only selected images (use short names) |
 | `bash build-images.sh export` | Save Docker images + repo into `privacyidea-images.tar.gz` (images must already exist) |
+| `bash build-images.sh export pi radius` | Export only selected images + repo |
 | `bash build-images.sh import` | Load Docker images from `docker-images.tar` (extract archive first, no internet required) |
 | `bash build-images.sh all` | Build + export in one step |
+| `bash build-images.sh all captive` | Build + export selected images only |
+| `bash build-images.sh help` | Show available commands and image short names |
 
 **Images included in the archive:**
 
@@ -780,23 +821,30 @@ For production stacks or manual testing, start a UDP listener on the host:
 nc -u -l 1514
 ```
 
-Then in your env file:
+Then in the respective per-service env files:
 
+`privacyidea.env`:
 ```
 PI_SYSLOG_ENABLED=true
 PI_SYSLOG_HOST=host.docker.internal
 PI_SYSLOG_PORT=1514
 PI_SYSLOG_LEVEL=INFO
+```
 
+`freeradius.env`:
+```
 RADIUS_SYSLOG_HOST=host.docker.internal
 RADIUS_SYSLOG_PORT=1514
 RADIUS_SYSLOG_LEVEL=DEBUG
 RADIUS_DEBUG=true
+```
 
-VPN_POOLER_SYSLOG_ENABLED=true
-VPN_POOLER_SYSLOG_HOST=host.docker.internal
-VPN_POOLER_SYSLOG_PORT=1514
-VPN_POOLER_SYSLOG_LEVEL=DEBUG
+`vpn_pooler.env`:
+```
+SYSLOG_ENABLED=true
+SYSLOG_HOST=host.docker.internal
+SYSLOG_PORT=1514
+SYSLOG_LEVEL=DEBUG
 ```
 
 ## Security considerations
@@ -883,6 +931,14 @@ docker exec -it prod-db-1 pg_dump -U pi pi > pi-dump.sql
 ## Changelog
 
 ### Recent changes
+
+**Per-service environment files and secrets refactoring**
+- Split the monolithic `application-prod.env` / `application-dev.env` into per-service env files under `environment/prod/` and `environment/dev/` (`compose.env`, `db.env`, `privacyidea.env`, `freeradius.env`, `vpn_pooler.env`, `captive.env`). Each service file uses the actual variable names the app expects — no more prefix-stripping in `docker-compose.yaml`.
+- `make secrets` now auto-generates and writes secrets directly into the per-service env files (PI_SECRET, PI_PEPPER, PI_ADMIN_PASS, PI_ENCKEY, DB_PASSWORD synced across db.env + privacyidea.env, Django secret keys for VPN Pooler and Captive Portal).
+- Added `make superadmin-policy` target to import `templates/superadmin-policy.json` into a running privacyIDEA instance. The policy includes: superuser admin permissions (scope `admin`), WebUI dashboard/wizard (scope `webui`), VPN Pooler user-attribute permissions (scope `user`), and self-service TOTP enrollment for captive portal (scope `user`).
+- Added `/etc/hosts` read-only bind mount to all prod stack services for host-level DNS resolution inside containers.
+- Fixed captive portal and VPN Pooler static files 404 in prod: moved `collectstatic` from Dockerfile build-time to container startup (bind mounts shadow build-time files).
+- `build-images.sh` now supports selective build/export by passing image short names (e.g. `bash build-images.sh build captive pooler`) and a `help` command.
 
 **Systemd service and TLS cert configuration**
 - Added `make install-service` / `make uninstall-service` targets to deploy a systemd unit that starts/stops the stack on boot (configurable user and working directory)

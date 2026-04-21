@@ -38,44 +38,55 @@ cert:
 	@echo Certificate generation done...
 
 secrets:
-	$(eval ENV_FILE := environment/application-$(TAG).env)
-	@test -f $(ENV_FILE) || { echo "ERROR: $(ENV_FILE) not found"; exit 1; }
-	@echo "Generating secrets for $(ENV_FILE) ..."
-	@# --- core secrets ---
-	@NEW=$$($(RANDOM_32)); sed -i "s|^PI_SECRET=.*|PI_SECRET=$$NEW|" $(ENV_FILE); echo "  PI_SECRET=$$NEW"
-	@NEW=$$($(RANDOM_32)); sed -i "s|^PI_PEPPER=.*|PI_PEPPER=$$NEW|" $(ENV_FILE); echo "  PI_PEPPER=$$NEW"
-	@NEW=$$($(RANDOM_16)); sed -i "s|^PI_ADMIN_PASS=.*|PI_ADMIN_PASS=$$NEW|" $(ENV_FILE); echo "  PI_ADMIN_PASS=$$NEW"
-	@NEW=$$($(RANDOM_32)); sed -i "s|^DB_PASSWORD=.*|DB_PASSWORD=$$NEW|" $(ENV_FILE); echo "  DB_PASSWORD=$$NEW"
+	$(eval ENV_DIR := environment/$(TAG))
+	@test -d $(ENV_DIR) || { echo "ERROR: $(ENV_DIR)/ not found"; exit 1; }
+	@echo "Generating secrets for $(ENV_DIR)/ ..."
+	@# --- privacyidea.env ---
+	@NEW=$$($(RANDOM_32)); sed -i "s|^PI_SECRET=.*|PI_SECRET=$$NEW|" $(ENV_DIR)/privacyidea.env; echo "  PI_SECRET=$$NEW"
+	@NEW=$$($(RANDOM_32)); sed -i "s|^PI_PEPPER=.*|PI_PEPPER=$$NEW|" $(ENV_DIR)/privacyidea.env; echo "  PI_PEPPER=$$NEW"
+	@NEW=$$($(RANDOM_16)); sed -i "s|^PI_ADMIN_PASS=.*|PI_ADMIN_PASS=$$NEW|" $(ENV_DIR)/privacyidea.env; echo "  PI_ADMIN_PASS=$$NEW"
 	@# --- PI_ENCKEY (96 random bytes, base64) ---
 	@NEW=$$($(RANDOM_ENCKEY)); \
-		if grep -q '^#PI_ENCKEY=' $(ENV_FILE); then \
-			sed -i "s|^#PI_ENCKEY=.*|PI_ENCKEY=$$NEW|" $(ENV_FILE); \
-		elif grep -q '^PI_ENCKEY=' $(ENV_FILE); then \
-			sed -i "s|^PI_ENCKEY=.*|PI_ENCKEY=$$NEW|" $(ENV_FILE); \
+		if grep -q '^#PI_ENCKEY=' $(ENV_DIR)/privacyidea.env; then \
+			sed -i "s|^#PI_ENCKEY=.*|PI_ENCKEY=$$NEW|" $(ENV_DIR)/privacyidea.env; \
+		elif grep -q '^PI_ENCKEY=' $(ENV_DIR)/privacyidea.env; then \
+			sed -i "s|^PI_ENCKEY=.*|PI_ENCKEY=$$NEW|" $(ENV_DIR)/privacyidea.env; \
 		else \
-			sed -i '/^PI_SECRET=/a PI_ENCKEY='"$$NEW" $(ENV_FILE); \
+			sed -i '/^PI_SECRET=/a PI_ENCKEY='"$$NEW" $(ENV_DIR)/privacyidea.env; \
 		fi; echo "  PI_ENCKEY=$$NEW"
-	@# --- Django secret keys ---
-	@NEW=$$($(RANDOM_50)); sed -i "s|^VPN_POOLER_DJANGO_SECRET_KEY=.*|VPN_POOLER_DJANGO_SECRET_KEY=$$NEW|" $(ENV_FILE); echo "  VPN_POOLER_DJANGO_SECRET_KEY=$$NEW"
-	@NEW=$$($(RANDOM_50)); sed -i "s|^CAPTIVE_DJANGO_SECRET_KEY=.*|CAPTIVE_DJANGO_SECRET_KEY=$$NEW|" $(ENV_FILE); echo "  CAPTIVE_DJANGO_SECRET_KEY=$$NEW"
-	@echo "Done. All secrets written to $(ENV_FILE)"
+	@# --- db.env + privacyidea.env (DB_PASSWORD must match) ---
+	@NEW=$$($(RANDOM_32)); \
+		sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$$NEW|" $(ENV_DIR)/db.env; \
+		sed -i "s|^DB_PASSWORD=.*|DB_PASSWORD=$$NEW|" $(ENV_DIR)/privacyidea.env; \
+		echo "  DB_PASSWORD=$$NEW"
+	@# --- vpn_pooler.env ---
+	@NEW=$$($(RANDOM_50)); sed -i "s|^DJANGO_SECRET_KEY=.*|DJANGO_SECRET_KEY=$$NEW|" $(ENV_DIR)/vpn_pooler.env; echo "  VPN_POOLER_DJANGO_SECRET_KEY=$$NEW"
+	@# --- captive.env ---
+	@NEW=$$($(RANDOM_50)); sed -i "s|^DJANGO_SECRET_KEY=.*|DJANGO_SECRET_KEY=$$NEW|" $(ENV_DIR)/captive.env; echo "  CAPTIVE_DJANGO_SECRET_KEY=$$NEW"
+	@echo "Done. Secrets written to $(ENV_DIR)/"
 	
 stack:
-	@PI_BOOTSTRAP="true" \
-	${CONTAINER_ENGINE} compose --env-file=environment/application-${TAG}.env -p ${TAG} --profile=${PROFILE} up -d
-	@echo 
+	@TAG=${TAG} PI_BOOTSTRAP="true" \
+	${CONTAINER_ENGINE} compose --env-file=environment/${TAG}/compose.env -p ${TAG} --profile=${PROFILE} up -d
+	@echo
 	@echo Access to privacyIDEA Web-UI: https://localhost:8443
-	
+
 fullstack:
-	@PI_BOOTSTRAP="true" \
-	${CONTAINER_ENGINE} compose -f docker-compose.yaml -f docker-compose.dev.yaml --env-file=environment/application-${TAG}.env -p ${TAG} --profile=fullstack up -d
+	@TAG=${TAG} PI_BOOTSTRAP="true" \
+	${CONTAINER_ENGINE} compose -f docker-compose.yaml -f docker-compose.dev.yaml --env-file=environment/${TAG}/compose.env -p ${TAG} --profile=fullstack up -d
 	@echo 
 	@echo Access to privacyIDEA Web-UI: https://localhost:8443
 	@echo to create resolvers and realm, please run: make resolver
 
+superadmin-policy:
+	${CONTAINER_ENGINE} cp templates/superadmin-policy.json ${TAG}-privacyidea-1:/tmp/superadmin-policy.json
+	${CONTAINER_ENGINE} exec ${TAG}-privacyidea-1 /privacyidea/venv/bin/pi-manage config import -i /tmp/superadmin-policy.json
+	${CONTAINER_ENGINE} exec ${TAG}-privacyidea-1 rm /tmp/superadmin-policy.json
+	@echo "superadmin policy imported."
+
 resolver:
-	${CONTAINER_ENGINE} cp templates/resolver.json prod-privacyidea-1:/privacyidea/etc/resolver.json
-	${CONTAINER_ENGINE} exec -ti prod-privacyidea-1 /privacyidea/venv/bin/pi-manage config import -i /privacyidea/etc/resolver.json
+	${CONTAINER_ENGINE} cp templates/resolver.json ${TAG}-privacyidea-1:/privacyidea/etc/resolver.json
+	${CONTAINER_ENGINE} exec -ti ${TAG}-privacyidea-1 /privacyidea/venv/bin/pi-manage config import -i /privacyidea/etc/resolver.json
 	@echo resolvers and realm created.
 	@echo "############################################################################"
 	@echo "admin login with: admin@admin / admin "
