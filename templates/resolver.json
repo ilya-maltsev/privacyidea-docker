@@ -201,9 +201,7 @@
       "active": true,
       "scope": "admin",
       "realm": [],
-      "adminrealm": [
-        "admin"
-      ],
+      "adminrealm": [],
       "adminuser": [],
       "resolver": [],
       "pinode": [],

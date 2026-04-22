@@ -184,6 +184,7 @@ export_images() {
         --exclude='pi-vpn-pooler' \
         --exclude='pi-custom-captive' \
         --exclude='docker-compose.dev.yaml' \
+        --exclude='privacyidea-images.tar.gz' \
         "${REPO_NAME}"
 
     mv "${TMPARCHIVE}" "${ARCHIVE}"

@@ -148,3 +148,5 @@ cython_debug/
 .env
 design_handoff_vpn_pooler/
 *.tar.gz
+data/
+environment/dev/
