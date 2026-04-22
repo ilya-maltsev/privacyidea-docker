@@ -192,6 +192,98 @@
       }
     },
     {
+      "name": "admin_2fa_login",
+      "user_case_insensitive": false,
+      "active": true,
+      "scope": "webui",
+      "realm": ["admin", "helpdesk"],
+      "adminrealm": [],
+      "adminuser": [],
+      "resolver": [],
+      "pinode": [],
+      "check_all_resolvers": false,
+      "user": [],
+      "client": [],
+      "time": "",
+      "conditions": [],
+      "priority": 1,
+      "description": "Force admins to authenticate via privacyIDEA tokens",
+      "user_agents": [],
+      "action": {
+        "login_mode": "privacyIDEA"
+      }
+    },
+    {
+      "name": "admin_passOnNoToken",
+      "user_case_insensitive": false,
+      "active": true,
+      "scope": "authentication",
+      "realm": ["admin", "helpdesk"],
+      "adminrealm": [],
+      "adminuser": [],
+      "resolver": [],
+      "pinode": [],
+      "check_all_resolvers": false,
+      "user": [],
+      "client": [],
+      "time": "",
+      "conditions": [],
+      "priority": 1,
+      "description": "Allow admin login with password only when no token is enrolled",
+      "user_agents": [],
+      "action": {
+        "passOnNoToken": true
+      }
+    },
+    {
+      "name": "admin_otppin_userstore",
+      "user_case_insensitive": false,
+      "active": true,
+      "scope": "authentication",
+      "realm": ["admin", "helpdesk"],
+      "adminrealm": [],
+      "adminuser": [],
+      "resolver": [],
+      "pinode": [],
+      "check_all_resolvers": false,
+      "user": [],
+      "client": [],
+      "time": "",
+      "conditions": [],
+      "priority": 1,
+      "description": "Use LDAP password as OTP PIN for admin realms",
+      "user_agents": [],
+      "action": {
+        "otppin": "userstore"
+      }
+    },
+    {
+      "name": "admin_selfenroll",
+      "user_case_insensitive": false,
+      "active": true,
+      "scope": "user",
+      "realm": ["admin", "helpdesk"],
+      "adminrealm": [],
+      "adminuser": [],
+      "resolver": [],
+      "pinode": [],
+      "check_all_resolvers": false,
+      "user": [],
+      "client": [],
+      "time": "",
+      "conditions": [],
+      "priority": 1,
+      "description": "Allow admins to self-enroll TOTP tokens",
+      "user_agents": [],
+      "action": {
+        "enrollTOTP": true,
+        "totp_force_server_generate": true,
+        "totp_hashlib": "sha1",
+        "totp_otplen": "6",
+        "totp_timestep": "30"
+      }
+    },
+    {
       "name": "selfservice",
       "user_case_insensitive": false,
       "active": true,
@@ -212,7 +304,7 @@
       "action": {
         "enrollTOTP": true,
         "totp_force_server_generate": true,
-        "totp_hashlib": "sha256",
+        "totp_hashlib": "sha1",
         "totp_otplen": "6",
         "totp_timestep": "30",
         "tokenlist": true,
