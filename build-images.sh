@@ -112,6 +112,41 @@ EOF
 
 # --- Core functions -----------------------------------------------------------
 
+# Whitelist of files/dirs copied into each image's Docker build context.
+# Add new app dirs here when a project grows; anything outside these lists
+# (docs, planning, compose files, .git, runtime data, etc.) stays out.
+PI_FILES=(conf entrypoint.py templates)
+RADIUS_FILES=(entrypoint.sh privacyidea_radius.py dictionary.netknights raddb)
+VPN_POOLER_FILES=(requirements.txt manage.py config pooler locale)
+CAPTIVE_FILES=(requirements.txt manage.py config captive locale)
+
+_STAGED_DIRS=()
+_cleanup_staged() {
+    local d
+    for d in "${_STAGED_DIRS[@]}"; do
+        [ -d "${d}" ] && rm -rf "${d}"
+    done
+}
+trap _cleanup_staged EXIT
+
+# Stage a whitelist of files/dirs from ${src} into a fresh tmp dir.
+# Usage: ctx=$(stage_build_context <src_dir> <file1> <file2> ...)
+stage_build_context() {
+    local src="$1"; shift
+    local dir
+    dir="$(mktemp -d -t pi-build-ctx.XXXXXX)"
+    _STAGED_DIRS+=("${dir}")
+    local item
+    for item in "$@"; do
+        if [ ! -e "${src}/${item}" ]; then
+            echo "ERROR: required file '${item}' not found in ${src}" >&2
+            exit 1
+        fi
+        cp -a "${src}/${item}" "${dir}/"
+    done
+    echo "${dir}"
+}
+
 pull_infra() {
     for img in ${INFRA_IMAGES}; do
         if is_selected "$img"; then
@@ -131,34 +166,45 @@ build_images() {
     init_submodules
     pull_infra
 
+    local ctx
+
     if is_selected "privacyidea-docker:3.13"; then
         echo ""
         echo "=== Building privacyidea-docker:3.13 ==="
-        docker build --no-cache -t privacyidea-docker:3.13 \
+        ctx="$(stage_build_context "${SCRIPT_DIR}" "${PI_FILES[@]}")"
+        docker build --no-cache \
+            -f "${SCRIPT_DIR}/Dockerfile" \
+            -t privacyidea-docker:3.13 \
             --build-arg PI_VERSION=3.13 \
             --build-arg PI_VERSION_BUILD=3.13 \
-            "${SCRIPT_DIR}/"
+            "${ctx}"
     fi
 
     if is_selected "privacyidea-freeradius:latest"; then
         echo ""
         echo "=== Building privacyidea-freeradius:latest ==="
-        docker build --no-cache -t privacyidea-freeradius:latest \
-            "${SCRIPT_DIR}/rlm_python3/"
+        ctx="$(stage_build_context "${SCRIPT_DIR}/rlm_python3" "${RADIUS_FILES[@]}")"
+        docker build --no-cache \
+            -f "${SCRIPT_DIR}/rlm_python3/Dockerfile" \
+            -t privacyidea-freeradius:latest "${ctx}"
     fi
 
     if is_selected "pi-vpn-pooler:latest"; then
         echo ""
         echo "=== Building pi-vpn-pooler:latest ==="
-        docker build --no-cache -t pi-vpn-pooler:latest \
-            "${SCRIPT_DIR}/pi-vpn-pooler/"
+        ctx="$(stage_build_context "${SCRIPT_DIR}/pi-vpn-pooler" "${VPN_POOLER_FILES[@]}")"
+        docker build --no-cache \
+            -f "${SCRIPT_DIR}/pi-vpn-pooler/Dockerfile" \
+            -t pi-vpn-pooler:latest "${ctx}"
     fi
 
     if is_selected "pi-custom-captive:latest"; then
         echo ""
         echo "=== Building pi-custom-captive:latest ==="
-        docker build --no-cache -t pi-custom-captive:latest \
-            "${SCRIPT_DIR}/pi-custom-captive/"
+        ctx="$(stage_build_context "${SCRIPT_DIR}/pi-custom-captive" "${CAPTIVE_FILES[@]}")"
+        docker build --no-cache \
+            -f "${SCRIPT_DIR}/pi-custom-captive/Dockerfile" \
+            -t pi-custom-captive:latest "${ctx}"
     fi
 
     echo ""
@@ -167,6 +213,19 @@ build_images() {
         | grep -E "^  (privacyidea-|pi-vpn-|pi-custom-|nginx|postgres|osixia)" || true
 }
 
+# Files/dirs shipped to the target host in the export tarball.
+# Whitelist: anything not listed here stays out (docs, planning, dev tooling,
+# submodule sources, .git, CI config, etc.).
+DEPLOY_PATHS=(
+    build-images.sh
+    docker-compose.yaml
+    Makefile
+    setup-service.sh
+    conf
+    environment
+    templates
+)
+
 export_images() {
     local IMAGES
     IMAGES="$(selected_images_list)"
@@ -174,18 +233,19 @@ export_images() {
     echo "  images: ${IMAGES}"
     docker save ${IMAGES} > "${SCRIPT_DIR}/${DOCKER_IMAGES_TAR}"
 
-    echo "=== Creating archive (repo + Docker images) ==="
+    echo "=== Creating archive (deploy files + Docker images) ==="
     local TMPARCHIVE
     TMPARCHIVE="$(mktemp "$(dirname "${SCRIPT_DIR}")/.privacyidea-images.XXXXXX.tar.gz")"
+
+    local tar_entries=()
+    for p in "${DEPLOY_PATHS[@]}"; do
+        tar_entries+=("${REPO_NAME}/${p}")
+    done
+    tar_entries+=("${REPO_NAME}/${DOCKER_IMAGES_TAR}")
+
     tar czf "${TMPARCHIVE}" \
         -C "$(dirname "${SCRIPT_DIR}")" \
-        --exclude='.git' \
-        --exclude='rlm_python3' \
-        --exclude='pi-vpn-pooler' \
-        --exclude='pi-custom-captive' \
-        --exclude='docker-compose.dev.yaml' \
-        --exclude='privacyidea-images.tar.gz' \
-        "${REPO_NAME}"
+        "${tar_entries[@]}"
 
     mv "${TMPARCHIVE}" "${ARCHIVE}"
     rm -f "${SCRIPT_DIR}/${DOCKER_IMAGES_TAR}"
