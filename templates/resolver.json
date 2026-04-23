@@ -494,6 +494,28 @@
       }
     },
     {
+      "name": "admin_challenge_response",
+      "user_case_insensitive": false,
+      "active": true,
+      "scope": "authentication",
+      "realm": ["admin", "helpdesk"],
+      "adminrealm": [],
+      "adminuser": [],
+      "resolver": [],
+      "pinode": [],
+      "check_all_resolvers": false,
+      "user": [],
+      "client": [],
+      "time": "",
+      "conditions": [],
+      "priority": 1,
+      "description": "Enable TOTP challenge-response for admin 2-step login",
+      "user_agents": [],
+      "action": {
+        "challenge_response": "totp"
+      }
+    },
+    {
       "name": "admin_selfenroll",
       "user_case_insensitive": false,
       "active": true,

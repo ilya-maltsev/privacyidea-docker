@@ -150,3 +150,4 @@ design_handoff_vpn_pooler/
 *.tar.gz
 data/
 environment/dev/
+validate_endpoints_doc.txt
