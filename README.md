@@ -539,6 +539,7 @@ The VPN Pooler is **stateless** — no database. Pool definitions are stored in 
 ```DJANGO_ALLOWED_HOSTS```| * | Django allowed hosts
 ```CSRF_TRUSTED_ORIGINS```| https://localhost:5443 | CSRF trusted origins
 ```DJANGO_LANGUAGE_CODE```| en | Default UI language when the visitor has no `django_language` cookie yet and no matching `Accept-Language` header. For Russian-only deployments, set `ru`. Must be one of `en`, `ru`. The app strips `Accept-Language` for visitors without the language cookie so this default applies; once the user clicks the topbar RU/EN switcher their choice is persisted in the `django_language` cookie.
+```SESSION_COOKIE_AGE```| 43200 | Session cookie lifetime in **seconds** (upper bound). The actual per-session lifetime is pinned to the PI JWT's `exp` claim at login — the cookie dies exactly when the JWT does. Raise this only if PI issues longer-lived JWTs (see [Session / JWT lifetime sync](#session--jwt-lifetime-sync)).
 ```SYSLOG_ENABLED```| false | Enable remote syslog forwarding from Django. When `false`, logs only go to stdout / container logs.
 ```SYSLOG_HOST```| *(empty)* | Remote rsyslog host. Required when `SYSLOG_ENABLED=true`.
 ```SYSLOG_PORT```| 514 | Remote rsyslog port.
@@ -565,6 +566,7 @@ The captive portal is stateless (no DB) and uses **each actor's own PI JWT** —
 ```CSRF_TRUSTED_ORIGINS```| https://localhost:6443 | CSRF trusted origins
 ```DJANGO_LOG_LEVEL```| INFO | Django log level
 ```DJANGO_LANGUAGE_CODE```| en | Default UI language when the visitor has no `django_language` cookie yet and no matching `Accept-Language` header. For Russian-only deployments, set `ru`. Must be one of `en`, `ru`. The app strips `Accept-Language` for visitors without the language cookie so this default applies; once the user clicks the topbar RU/EN switcher their choice is persisted in the `django_language` cookie.
+```SESSION_COOKIE_AGE```| 43200 | Session cookie lifetime in **seconds** (upper bound). The actual per-session lifetime is pinned to the PI JWT's `exp` claim at login — the cookie dies exactly when the JWT does. Raise this only if PI issues longer-lived JWTs (see [Session / JWT lifetime sync](#session--jwt-lifetime-sync)).
 ```MTLS_ENABLED```| false | Opt-in mTLS header-auth for the **user** flow. When `true`, the portal skips the AD/LDAP password step and trusts identity carried in nginx-set headers after an upstream `ssl_verify_client on` succeeded. Admin flow is unaffected. See [`pi-custom-captive/README.md`](pi-custom-captive/README.md) and `templates/nginx-mtls.*.example.conf` in the submodule for the nginx side (includes a `map` regex to extract a login from a named-OID DN component, plus `ssl_ocsp on`). Never enable this while exposing gunicorn (:8000) directly.
 ```MTLS_USER_HEADER```| HTTP_X_SSL_USER | Django META key carrying the username (matches header `X-SSL-User`).
 ```MTLS_VERIFY_HEADER```| HTTP_X_SSL_VERIFY | Django META key carrying nginx's `$ssl_client_verify` status (matches header `X-SSL-Verify`).
@@ -579,6 +581,19 @@ The captive portal is stateless (no DB) and uses **each actor's own PI JWT** —
 
 > [!Note]
 > The `CAPTIVE_PORT` variable has moved to `compose.env` since it's a compose-level port mapping.
+
+### Session / JWT lifetime sync
+
+Both the VPN Pooler and Captive Portal run stateless Django sessions that carry a privacyIDEA JWT. The two have independent lifetimes, and a mismatch used to cause `PIClientError: JWT expired — re-login required.` 500s when the session cookie outlived the token.
+
+**How the sync works now:**
+
+1. **PI owns the JWT lifetime.** Configure it server-side on privacyIDEA — either globally via the `PI_LOGOUT_TIME` setting in `pi.cfg`, or per-admin/realm via a policy in scope `webui` with action `jwtvalidity` (integer seconds). The JWT's `exp` claim is the authoritative expiration.
+2. **At login, the Django session is pinned to `exp`.** The pooler (`pooler/views.py::_bind_session_to_jwt`) and captive portal (`captive/views.py::_bind_session_to_jwt`) decode the JWT payload and call `request.session.set_expiry(exp − now)` right after stashing the token. The session cookie now dies the same moment the JWT does.
+3. **Every protected request re-checks `exp`.** `pi_auth_required` (pooler) and `admin_required` (captive) decode the JWT on every hit and, if expired, flush the session and redirect to the login page with a flash message — no more 500s.
+4. **`SESSION_COOKIE_AGE` is just an upper bound / fallback** for the rare case a JWT lacks `exp`. In **seconds**. Defaults: pooler `43200` (12 h), captive `43200` (12 h). Override per-service via the env files — raising it only matters if PI issues JWTs longer than the default.
+
+**Recommended PI policy:** set `jwtvalidity` to `28800` (8 h) for the admin realms that use the captive/pooler — long enough for a work day, short enough that a stolen cookie doesn't linger. No code or env change required on this side.
 
 ### LDAP parameters (for compose/fullstack)
 | Variable | Default | Description
