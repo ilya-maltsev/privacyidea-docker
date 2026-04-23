@@ -538,6 +538,7 @@ The VPN Pooler is **stateless** — no database. Pool definitions are stored in 
 ```DJANGO_DEBUG```| false | Enable Django debug mode
 ```DJANGO_ALLOWED_HOSTS```| * | Django allowed hosts
 ```CSRF_TRUSTED_ORIGINS```| https://localhost:5443 | CSRF trusted origins
+```DJANGO_LANGUAGE_CODE```| en | Default UI language when the visitor has no `django_language` cookie yet and no matching `Accept-Language` header. For Russian-only deployments, set `ru`. Must be one of `en`, `ru`. The app strips `Accept-Language` for visitors without the language cookie so this default applies; once the user clicks the topbar RU/EN switcher their choice is persisted in the `django_language` cookie.
 ```SYSLOG_ENABLED```| false | Enable remote syslog forwarding from Django. When `false`, logs only go to stdout / container logs.
 ```SYSLOG_HOST```| *(empty)* | Remote rsyslog host. Required when `SYSLOG_ENABLED=true`.
 ```SYSLOG_PORT```| 514 | Remote rsyslog port.
@@ -563,6 +564,7 @@ The captive portal is stateless (no DB) and uses **each actor's own PI JWT** —
 ```DJANGO_ALLOWED_HOSTS```| * | Django allowed hosts
 ```CSRF_TRUSTED_ORIGINS```| https://localhost:6443 | CSRF trusted origins
 ```DJANGO_LOG_LEVEL```| INFO | Django log level
+```DJANGO_LANGUAGE_CODE```| en | Default UI language when the visitor has no `django_language` cookie yet and no matching `Accept-Language` header. For Russian-only deployments, set `ru`. Must be one of `en`, `ru`. The app strips `Accept-Language` for visitors without the language cookie so this default applies; once the user clicks the topbar RU/EN switcher their choice is persisted in the `django_language` cookie.
 ```MTLS_ENABLED```| false | Opt-in mTLS header-auth for the **user** flow. When `true`, the portal skips the AD/LDAP password step and trusts identity carried in nginx-set headers after an upstream `ssl_verify_client on` succeeded. Admin flow is unaffected. See [`pi-custom-captive/README.md`](pi-custom-captive/README.md) and `templates/nginx-mtls.*.example.conf` in the submodule for the nginx side (includes a `map` regex to extract a login from a named-OID DN component, plus `ssl_ocsp on`). Never enable this while exposing gunicorn (:8000) directly.
 ```MTLS_USER_HEADER```| HTTP_X_SSL_USER | Django META key carrying the username (matches header `X-SSL-User`).
 ```MTLS_VERIFY_HEADER```| HTTP_X_SSL_VERIFY | Django META key carrying nginx's `$ssl_client_verify` status (matches header `X-SSL-Verify`).
