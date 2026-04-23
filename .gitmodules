@@ -1,9 +1,12 @@
 [submodule "pi-vpn-pooler"]
 	path = pi-vpn-pooler
 	url = https://github.com/ilya-maltsev/pi-vpn-pooler.git
+	branch = main
 [submodule "rlm_python3"]
 	path = rlm_python3
 	url = https://github.com/ilya-maltsev/rlm_python3.git
+	branch = main
 [submodule "pi-custom-captive"]
 	path = pi-custom-captive
 	url = https://github.com/ilya-maltsev/pi-custom-captive.git
+	branch = main
