@@ -47,7 +47,7 @@ COPY  templates/Acme.pem /privacyidea/etc/persistent/Acme.pem
 
 # New WebUI
 WORKDIR /privacyidea/pi_src/privacyidea/static_new
-RUN npm ci
+RUN npm ci --ignore-scripts && sync && npm rebuild
 RUN npm run-script ng build
 RUN rm -rf node_modules
 
