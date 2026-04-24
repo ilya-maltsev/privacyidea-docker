@@ -1,3 +1,82 @@
+Version 3.13.2, 2026-04-24
+
+  Platform expansion and production hardening
+
+New services:
+- Add pi-custom-captive submodule — self-service TOTP captive portal
+  with one-shot user enrolment and admin 2FA challenge-response flow.
+  Stateless (no DB, no service account), every PI call runs on the
+  actor's own JWT.
+- Add centralized rsyslog container (fullstack profile) — receives
+  syslog UDP/514 from privacyIDEA, FreeRADIUS, VPN Pooler and Captive
+  Portal; writes per-service log files to the rsyslog_logs volume.
+
+Syslog and logging:
+- Add remote syslog forwarding to privacyIDEA via PI_SYSLOG_* env vars.
+  entrypoint.py dynamically injects SysLogHandler into logging.cfg at
+  startup.
+- Add remote syslog forwarding to rlm_python3 FreeRADIUS plugin
+  (RADIUS_SYSLOG_* env vars) with DEBUG full-packet dumps, secret
+  redaction and accounting handler.
+- Add remote syslog forwarding to pi-vpn-pooler and pi-custom-captive
+  Django apps (SYSLOG_* env vars) with DEBUG HTTP request/response
+  logging and secret redaction.
+
+Environment and configuration:
+- Split monolithic application-prod.env / application-dev.env into
+  per-service env files under environment/{prod,dev}/ (compose.env,
+  db.env, privacyidea.env, freeradius.env, vpn_pooler.env, captive.env).
+  Each file uses actual variable names the app expects — no more
+  prefix-stripping in docker-compose.yaml.
+- Add make secrets target to auto-generate and write random secrets
+  into per-service env files (PI_SECRET, PI_PEPPER, PI_ADMIN_PASS,
+  PI_ENCKEY, DB_PASSWORD, Django secret keys for VPN Pooler and
+  Captive Portal).
+- Add make superadmin-policy target to import superadmin policy JSON
+  into a running privacyIDEA instance (admin API permissions, WebUI
+  dashboard, user self-service TOTP enrollment).
+- Add SESSION_COOKIE_AGE support for VPN Pooler and Captive Portal
+  with JWT exp-based session pinning.
+
+Build and deployment:
+- Expand build-images.sh with selective build/export by short names,
+  help command, and archive bundling (repo + Docker images in one
+  .tar.gz for offline deployment).
+- Add setup-service.sh and templates/privacyidea-docker.service for
+  systemd service installation (non-root, auto-start on boot).
+- Add make install-service / make uninstall-service targets.
+- Change NGINX_TLS_CERT_PATH / NGINX_TLS_KEY_PATH to control the
+  host-side bind mount source for production TLS certificates.
+
+Dev environment:
+- Add docker-compose.dev.yaml override for subproject hot-reload:
+  bind-mounts pi-vpn-pooler and pi-custom-captive source with gunicorn
+  --reload, bind-mounts privacyidea_radius.py into freeradius.
+- Add PI_SEED_RESOLVERS for dev-only idempotent resolver/realm import
+  on first boot.
+- Add /etc/hosts read-only bind mount to all prod stack services.
+
+Submodules:
+- Register pi-custom-captive, pi-vpn-pooler and rlm_python3 in
+  .gitmodules with branch tracking.
+- VPN Pooler DB init script removed — pooler is now fully stateless
+  (YAML-backed pool storage, no database).
+
+Documentation:
+- Major README.md restructuring with full coverage of new services,
+  environment variables, systemd deployment, offline deployment and
+  syslog configuration.
+- Add README.ru.md translations for all projects (privacyidea-docker,
+  pi-custom-captive, pi-vpn-pooler, rlm_python3, design_handoff).
+- Add EN/RU cross-links to all README files.
+
+Bug fixes:
+- Fix captive portal and VPN Pooler static files 404 in prod: moved
+  collectstatic from Dockerfile build-time to container startup.
+- Fix instantiate() crash in rlm_python3 when FreeRADIUS passes None
+  config.
+- Change privacyIDEA source to upstream privacyidea/privacyidea.
+
 Version 3.13.1, 2026-04-17
 
   Fork and restructure
