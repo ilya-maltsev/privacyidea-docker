@@ -527,6 +527,7 @@ Nginx `reverse_proxy` выполняет терминацию TLS для privacy
 ```RADIUS_SYSLOG_FACILITY```| auth | Facility syslog: `auth`, `authpriv`, `daemon`, `local0`..`local7`.
 ```RADIUS_SYSLOG_TAG```| privacyidea-radius | Имя программы / идентификатор syslog.
 ```RADIUS_SYSLOG_LEVEL```| INFO | Минимальный уровень пересылки в syslog: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. Должен быть `DEBUG` для просмотра полных дампов пакетов от `RADIUS_DEBUG=true`.
+```RADIUS_PI_MAPPING_USER```| *(пусто)* | Инъекция записей в секцию `[Mapping user]` файла `rlm_python.ini` при старте контейнера — поля privacyIDEA `detail.user.<ключ>` мапятся в атрибуты ответа RADIUS. Формат: пары `pi_key=Radius-Attribute`, разделённые запятыми. Пример: `vpn_ip=Framed-IP-Address,group=Class`. Блок регенерируется при каждом старте (идемпотентно), поэтому изменение значения и перезапуск чисто обновляют маппинг.
 
 ### Параметры VPN Pooler (`vpn_pooler.env`)
 
@@ -950,6 +951,12 @@ docker exec -it prod-db-1 pg_dump -U pi pi > pi-dump.sql
 ## Журнал изменений
 
 ### Последние изменения
+
+**Маппинг `[Mapping user]` для атрибутов ответа FreeRADIUS через переменную окружения**
+- Добавлена переменная окружения `RADIUS_PI_MAPPING_USER` (см. [Параметры RADIUS](#параметры-radius-freeradiusenv)). Принимает список пар `pi_key=Radius-Attribute`, разделённых запятыми, и инъектирует их в секцию `[Mapping user]` файла `rlm_python.ini` при старте контейнера, так что значения privacyIDEA `detail.user.<pi_key>` попадают в указанный атрибут ответа RADIUS в Access-Accept.
+- Типовой сценарий: `RADIUS_PI_MAPPING_USER=vpn_ip=Framed-IP-Address` — выделенный VPN Pooler'ом IP пользователя возвращается на NAS в стандартном атрибуте `Framed-IP-Address`.
+- `rlm_python3/entrypoint.sh` регенерирует блок при каждом старте между маркерами `# BEGIN auto-mapping-user` / `# END auto-mapping-user` (идемпотентно: изменение переменной и перезапуск контейнера обновляют маппинг без дублирования).
+- Требуется пересборка образа, чтобы подхватить новый entrypoint: `docker compose build freeradius && docker compose up -d --force-recreate freeradius`.
 
 **Рефакторинг файлов окружения по сервисам и секретов**
 - Монолитные файлы `application-prod.env` / `application-dev.env` разделены на файлы окружения по сервисам в каталогах `environment/prod/` и `environment/dev/` (`compose.env`, `db.env`, `privacyidea.env`, `freeradius.env`, `vpn_pooler.env`, `captive.env`). Каждый файл сервиса использует фактические имена переменных, которые ожидает приложение — больше никакого удаления префиксов в `docker-compose.yaml`.
